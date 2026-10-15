@@ -1,0 +1,9 @@
+# 构建中间产物
+.build/
+__pycache__/
+*.pyc
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
