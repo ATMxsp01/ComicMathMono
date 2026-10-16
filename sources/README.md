@@ -15,6 +15,7 @@
 | `julia/JuliaMonoNerdFontMono-BoldItalic.ttf` | Nerd Fonts | JuliaMono Nerd Font **Mono** BoldItalic | 0.062 / NF 3.4.0 | OFL-1.1 |
 | `NotoSansSymbols2-Regular.ttf` | notofonts/symbols | Noto Sans Symbols 2 Regular | 2.008 | OFL-1.1 |
 | `NotoSansSymbols-Regular.ttf` | notofonts/symbols | Noto Sans Symbols Regular | 2.003 | OFL-1.1 |
+| `NotoSansCJKsc-Symbols5.ttf` | noto-cjk（子集） | 5 个 CJK 类 emoji 的单色轮廓 | — | OFL-1.1 |
 | `Noto-COLRv1.ttf` | noto-emoji | Noto Color Emoji（COLRv1 版） | 2.057（Unicode 18.0） | OFL-1.1 |
 
 ## 重新获取
@@ -54,3 +55,16 @@ curl -fLo sources/NotoSansSymbols2-Regular.ttf \
 curl -fLo data/emoji-data.txt \
   https://unicode.org/Public/UCD/latest/ucd/emoji/emoji-data.txt
 ```
+
+**Noto Sans CJK 子集**（5 个「CJK 类 emoji」的单色轮廓，4.3 KB）—— **不需要手动下载**，
+用仓库里的脚本从系统的 Noto Sans CJK 现场生成：
+
+```bash
+python3 tools/make_cjk_symbol_subset.py
+# 或指定源与输出：
+python3 tools/make_cjk_symbol_subset.py /usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc \
+    -o sources/NotoSansCJKsc-Symbols5.ttf
+```
+
+它是构建的**必需**输入（`build.py` 用它补 U+3030/U+303D/U+3297/U+3299/U+1F237），
+但构建本身不需要系统装有 CJK 字体 —— 子集已经在仓库里了。

@@ -24,15 +24,15 @@ DIST = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'dist')
 FACES = ['Regular', 'Bold', 'Italic', 'BoldItalic']
 ALLOWED_WIDTHS = {0, 550, 1100}
 # 每个 face 必须完整覆盖的源字体（本字体 = 基底 ∪ JuliaMono ∪ NotoEmoji）
+CJK_SUBSET = 'NotoSansCJKsc-Symbols5.ttf'   # tools/make_cjk_symbol_subset.py 生成
 SUPERSET = {
     'Regular':    ['ComicR.ttf', 'julia/JuliaMonoNerdFontMono-Regular.ttf'],
     'Bold':       ['ComicB.ttf', 'julia/JuliaMonoNerdFontMono-Bold.ttf'],
     'Italic':     ['SShI.ttf', 'julia/JuliaMonoNerdFontMono-Italic.ttf'],
     'BoldItalic': ['SShBI.ttf', 'julia/JuliaMonoNerdFontMono-BoldItalic.ttf'],
 }
-# 这些码点故意不收（见 docs/emoji-presentation.md），允许成为覆盖缺口
-DROPPED = ({0x3030, 0x303D, 0x3297, 0x3299, 0x1F237, 0xFE82C} |
-           set(range(0xFE4E5, 0xFE4EF)) | set(range(0xFE82E, 0xFE838)))
+# 这些码点故意不收（见 docs/emoji-presentation.md）：都是 Noto 内部私用区/未分配码点
+DROPPED = ({0xFE82C} | set(range(0xFE4E5, 0xFE4EF)) | set(range(0xFE82E, 0xFE838)))
 
 problems = []
 notes = []
@@ -140,8 +140,8 @@ def check_face(name, pres):
         if n_colr < 1200:
             fail(f'{name}: 默认彩色的码点只有 {n_colr} 个指向彩色字形（应为 1200+）')
 
-    # 7. 上游源字体的超集
-    for rel in SUPERSET[name]:
+    # 7. 上游源字体的超集（含从 Noto Sans CJK 抠出来的 5 字形子集）
+    for rel in SUPERSET[name] + [CJK_SUBSET]:
         sp = os.path.join(ROOT, 'sources', rel)
         if not os.path.exists(sp):
             notes.append(f'{name}: 源字体 {rel} 缺失，跳过超集检查')

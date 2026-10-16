@@ -72,6 +72,7 @@ SRC = {
     'noto': os.path.join(SOURCES, 'Noto-COLRv1.ttf'),
     'notosym2': os.path.join(SOURCES, 'NotoSansSymbols2-Regular.ttf'),
     'notosym': os.path.join(SOURCES, 'NotoSansSymbols-Regular.ttf'),
+    'cjk5': os.path.join(SOURCES, 'NotoSansCJKsc-Symbols5.ttf'),
 }
 
 # 成品字体里写入的许可信息（便于再分发时满足上游要求）
@@ -264,7 +265,8 @@ def set_cmap_entry(font, cp, name):
         t.cmap[cp] = name
 
 
-def copy_julia_into(base, julia, ranges, extra, overwrite, skip=None, suffix='.julia'):
+def copy_julia_into(base, julia, ranges, extra, overwrite, skip=None, suffix='.julia',
+                    advance=CELL):
     jcmap = julia.getBestCmap()
     jglyf = julia['glyf']
     order = list(base.getGlyphOrder())
@@ -296,7 +298,7 @@ def copy_julia_into(base, julia, ranges, extra, overwrite, skip=None, suffix='.j
         if dst_name not in order:
             order.append(dst_name)
         glyfs[dst_name] = copy.deepcopy(g)
-        hmtx[dst_name] = [CELL, 0]
+        hmtx[dst_name] = [advance, 0]
         set_cmap_entry(base, cp, dst_name)
         copied += 1
     base.setGlyphOrder(order)
@@ -338,7 +340,13 @@ def drop_cmap_entry(font, cp):
 
 
 def fill_mono_symbols(base, julia, need_mono):
-    """依次从 JuliaMono → Noto Sans Symbols 2 → Noto Sans Symbols 补单色轮廓。"""
+    """依次从 JuliaMono → Noto Sans Symbols 2 → Noto Sans Symbols → CJK 子集补单色轮廓。
+
+    最后一个来源是 `sources/NotoSansCJKsc-Symbols5.ttf`：5 个「CJK 类 emoji」
+    （U+3030 U+303D U+3297 U+3299 U+1F237）的单色轮廓。它们默认是文本呈现，
+    但只有 CJK 字体带单色轮廓，所以单独从 Noto Sans CJK 抠出来做成几 KB 的子集
+    （重生成见 tools/make_cjk_symbol_subset.py）。这几个是全角字形，按 2 格（WIDE）给。
+    """
     copy_julia_into(base, julia, [], need_mono, False)
     base_cmap = base.getBestCmap()
     for key, suffix in (('notosym2', '.sym2'), ('notosym', '.sym')):
@@ -349,6 +357,14 @@ def fill_mono_symbols(base, julia, need_mono):
             sym = normalize_symbol_font(TTFont(SRC[key]))
             copy_julia_into(base, sym, [], rest, False, suffix=suffix)
             base_cmap = base.getBestCmap()
+    rest = [cp for cp in need_mono if cp not in base_cmap]
+    if rest and os.path.exists(SRC['cjk5']):
+        cjk = TTFont(SRC['cjk5'])
+        upem = cjk['head'].unitsPerEm
+        cjk = flatten_scale_font(cjk, WIDE / upem, upem_factor=1000 / upem,
+                                 uniform_advance=WIDE)
+        copy_julia_into(base, cjk, [], rest, False, suffix='.cjk', advance=WIDE)
+        base_cmap = base.getBestCmap()
     return base_cmap
 
 

@@ -45,6 +45,14 @@ ComicMathMono 是**衍生作品**。`dist/` 下的成品字体和 `sources/` 下
 - 上游：<https://github.com/notofonts/symbols>
 - 版权：Copyright 2022 The Noto Project Authors
 
+### Noto Sans CJK SC（子集）— SIL Open Font License 1.1
+- 用途：`sources/NotoSansCJKsc-Symbols5.ttf` 只有 5 个字形，是 5 个「CJK 类 emoji」
+  （`U+3030` `U+303D` `U+3297` `U+3299` `U+1F237`）的单色轮廓
+- 上游：<https://github.com/notofonts/noto-cjk>
+- 版权：Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+  Copyright 2014-2021 Google Inc. All Rights Reserved.（原始声明保留在子集的 name 表里）
+- 生成方式：`python3 tools/make_cjk_symbol_subset.py`
+
 ## 数据文件
 
 ### `data/emoji-data.txt` — Unicode License
@@ -77,5 +85,5 @@ SOFTWARE.
 
 ## SIL Open Font License 1.1
 
-适用于 JuliaMono、Noto Color Emoji、Noto Sans Symbols / Symbols 2 部分，以及合并后的成品字体。
+适用于 JuliaMono、Noto Color Emoji、Noto Sans Symbols / Symbols 2、Noto Sans CJK SC 子集部分，以及合并后的成品字体。
 全文见 [`LICENSE-OFL-1.1.txt`](LICENSE-OFL-1.1.txt)。

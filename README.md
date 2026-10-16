@@ -35,7 +35,7 @@ Faces: **Regular, Bold, Italic, Bold Italic** (in [`dist/`](dist/)).
 - **Emoji presentation follows Unicode**: text-default characters (© ® ▪ ☀ ❤ …) carry a
   monochrome outline and switch to colour with VS16; colour-default ones (⌚ ⏰ ⏩ …) carry the
   colour glyph and switch to monochrome with VS15. A real cmap format-14 UVS table is generated
-  (224 variants each way) — see [`docs/emoji-presentation.md`](docs/emoji-presentation.md).
+  (229 variants each way) — see [`docs/emoji-presentation.md`](docs/emoji-presentation.md).
 - A GPOS `mark` lookup is generated for all 355 combining marks. They come from JuliaMono
   designed **centred in a 550 cell, baseline-aligned**, so the correct placement is simply
   "put the mark's origin back on the base's origin" — without GPOS, HarfBuzz's own heuristic
@@ -47,7 +47,7 @@ The font is defined as **ComicShannsMono ⊎ JuliaMono Nerd Font Mono ⊎ Noto C
 `tools/verify.py` asserts it *is* a superset of every source it is built from — that is the
 property which lets the fallback chain below be empty of the two source families.
 
-**22,534** codepoints in every face (all four faces carry the colour emoji and the UVS table):
+**22,539** codepoints in every face (all four faces carry the colour emoji and the UVS table):
 
 | Area | Coverage |
 |---|---|
@@ -78,7 +78,7 @@ needs to keep what genuinely lies outside this font (CJK) plus an emoji safety n
     <test qual="any" name="family"><string>monospace</string></test>
     <edit name="family" mode="prepend" binding="strong">
         <string>ComicMathMono</string>       <!-- 1. main font (emoji in all four weights) -->
-        <string>Noto Color Emoji</string>    <!-- 2. only for the 26 codepoints left out on purpose -->
+        <string>Noto Color Emoji</string>    <!-- 2. safety net (the 21 codepoints left out are PUA/unassigned) -->
         <string>Sarasa Mono SC</string>      <!-- 3. CJK, monospaced -->
         <string>Jigmo</string>               <!-- 4. rare ideographs URO/ExtA   -->
         <string>Jigmo2</string>              <!-- 5. rare ideographs ExtB~F/I  -->
@@ -136,8 +136,10 @@ documented in [`docs/`](docs/) (see the CI workflow in [`.github/workflows/build
 
 ### Known limitations
 
-- **No CJK.** CJK ideographs and CJK punctuation are out of scope by design. 26 emoji
-  codepoints are dropped for the same reason — see [`docs/emoji-presentation.md`](docs/emoji-presentation.md).
+- **No CJK.** CJK ideographs and CJK punctuation are out of scope by design — the only
+  script-like leftovers are 5 CJK-adjacent emoji, which *are* included via a tiny 4 KB
+  glyph subset extracted from Noto Sans CJK (see [`docs/emoji-presentation.md`](docs/emoji-presentation.md)).
+  21 further codepoints are intentionally absent (Noto-internal PUA / unassigned — nothing types them).
 - **Arabic** is covered only as far as JuliaMono covers it, in isolated/initial forms;
   proper Arabic shaping needs a dedicated font.
 - **Hebrew** is covered, including niqqud (vowel points).
@@ -190,7 +192,7 @@ documented in [`docs/`](docs/) (see the CI workflow in [`.github/workflows/build
 `tools/verify.py` 会断言它确实是所有上游源字体的**超集** —— 正是这条性质让下面的 fallback
 链可以不再保留那两个上游等宽字族。
 
-**四个 face 各 22,534 个码点**（四个字重都带彩色 emoji 与 UVS 表）：
+**四个 face 各 22,539 个码点**（四个字重都带彩色 emoji 与 UVS 表）：
 
 | 类别 | 覆盖 |
 |---|---|
@@ -207,7 +209,7 @@ documented in [`docs/`](docs/) (see the CI workflow in [`.github/workflows/build
 | 盲文 | 100% |
 | Nerd Font 图标（含平面 15 Material Design Icons） | 100% |
 | 彩色 emoji（Noto COLRv1） | 源字体的 100%，**四个字重都有** |
-| emoji 默认呈现与 VS15/VS16 | 已实现（各 224 条真 UVS） |
+| emoji 默认呈现与 VS15/VS16 | 已实现（各 229 条真 UVS） |
 | 希伯来 / 阿拉伯 | 部分（JuliaMono 覆盖多少就多少） |
 | CJK | **不含**（有意为之） |
 
@@ -221,7 +223,7 @@ documented in [`docs/`](docs/) (see the CI workflow in [`.github/workflows/build
     <test qual="any" name="family"><string>monospace</string></test>
     <edit name="family" mode="prepend" binding="strong">
         <string>ComicMathMono</string>       <!-- 1. 主字体（四个字重都带 emoji） -->
-        <string>Noto Color Emoji</string>    <!-- 2. 只兜那 26 个故意未收录的码点 -->
+        <string>Noto Color Emoji</string>    <!-- 2. 安全网（未收录的 21 个都是私用区/未分配码点） -->
         <string>Sarasa Mono SC</string>      <!-- 3. 等宽中文 -->
         <string>Jigmo</string>               <!-- 4. 生僻字 URO/ExtA  -->
         <string>Jigmo2</string>              <!-- 5. 生僻字 ExtB~F/I -->
@@ -275,8 +277,9 @@ python3 tools/verify.py # 回归校验
 
 ### 已知限制
 
-- **不含 CJK**。汉字与中文标点按设计排除在外；26 个 emoji 码点也因为这个原因被丢弃，
-  见 [`docs/emoji-presentation.md`](docs/emoji-presentation.md)。
+- **不含 CJK**。汉字与中文标点按设计排除在外。唯一相关的 5 个 CJK 类 emoji **已收录** ——
+  做法是从 Noto Sans CJK 里抠出一个 4 KB 的 5 字形子集，见 [`docs/emoji-presentation.md`](docs/emoji-presentation.md)。
+  另有 21 个码点故意不收（Noto 内部私用区/未分配码点，正常打字永远不会用到）。
 - **阿拉伯文**只覆盖 JuliaMono 有的部分，且只能是孤立/词首形态；正确的阿拉伯文排版需要专用字体。
 - **希伯来文**已覆盖，含元音点（niqqud）。
 - **没有 kerning**，排版特性只有 `ccmp` 与 `mark`。

@@ -47,7 +47,7 @@ Unicode 给每个 emoji 字符定义了**默认呈现**（`Emoji_Presentation`�
 
 - 对每个"Noto 有、且默认是文本呈现"的码点，依次从
   **JuliaMono → Noto Sans Symbols 2** 拷一份单色轮廓进来；
-- 两者都没有的（26 个，全是 CJK 相关圈字与 Noto 内部私用区码点）**直接丢弃** ——
+- 两者都没有的**直接丢弃** ——
   与其留一个"看不见"的字符，不如让系统回退字体去兜底。
 
 ### 3.2 默认彩色呈现 → 把 cmap 让给 Noto
@@ -116,13 +116,31 @@ Unicode 给每个 emoji 字符定义了**默认呈现**（`Emoji_Presentation`�
 现在四个 face 都跑同一套 emoji 合并，`tools/verify.py` 会断言每个 face 里
 **1228 个「默认彩色」码点全部指向彩色字形**。代价是体积（每面约 8.2 MB）。
 
+## 4d. 5 个「CJK 类 emoji」：从 Noto Sans CJK 抠一个 4 KB 子集
+
+`U+3030` `U+303D` `U+3297` `U+3299` `U+1F237` 这 5 个是 **Emoji，但 Unicode 规定的默认呈现是
+「文本」**，所以字体必须给它们单色轮廓。麻烦在于：全系统只有 **CJK 字体**（Noto Sans CJK / Jigmo）
+带这些字形，而本项目不引入 CJK 字体。
+
+折中办法是**把字形单独抠出来**，做成一个随仓库分发的小子集：
+
+```bash
+python3 tools/make_cjk_symbol_subset.py     # 需要系统装有 Noto Sans CJK（仅生成时需要）
+# -> sources/NotoSansCJKsc-Symbols5.ttf     # 4.3 KB，5 个字形 + .notdef，OFL-1.1
+```
+
+`build.py` 的 `fill_mono_symbols()` 把它作为单色轮廓的**第四个来源**（在 Symbols 2 / Symbols 之后）。
+于是：构建时**不需要**系统装 CJK 字体，只有"重新生成子集"才需要。
+
+这 5 个按**全角（2 格 / advance 1100）**给，与 CJK 和 emoji 的惯例一致。
+效果：默认渲染出单色轮廓（纯文本渲染器里不再空白），加上 U+FE0F 则走 UVS 拿 Noto 的彩色版本。
+
 ## 5. 已知取舍
 
-- 丢弃的 **26 个码点** 不再由本字体提供，改由系统回退链负责：
-  `U+3030` `U+303D` `U+3297` `U+3299` `U+1F237`（CJK 类，唯一单色源是 Noto Sans CJK / Jigmo）
-  以及 21 个 Noto 内部私用区码点（`U+FE4E5`–`U+FE4EE`、`U+FE82C`、`U+FE82E`–`U+FE837`，
-  全系统只有 Noto Color Emoji 有）。
-  `U+1F549` OM SYMBOL 本来也在丢弃之列，现由 **Noto Sans Symbols** 补齐。
+- 丢弃的 **21 个码点**（`U+FE4E5`–`U+FE4EE`、`U+FE82C`、`U+FE82E`–`U+FE837`）不再由本字体提供：
+  它们全是 **Noto 内部私用区 / 未分配码点**（keycap 合成字形的编号之类），正常打字永远不会用到。
+  `U+1F549` OM SYMBOL 曾一度在丢弃之列，现由 **Noto Sans Symbols** 补齐；
+  5 个「CJK 类 emoji」则由下面的 CJK 子集补齐（见 4d 节）。
 - 单色轮廓来自 JuliaMono / Noto Sans Symbols 2 / Noto Sans Symbols，风格与 base 不同
   （例如 `©` 用的是 Julia 的无衬线版权符号）——这是"能看见"与"风格完全统一"之间的取舍。
 - 变体选择符的覆盖是"有单色有彩色才写 UVS"，所以 `😀` 这类没有单色版的
