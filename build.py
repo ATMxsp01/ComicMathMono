@@ -70,6 +70,7 @@ SRC = {
     'julia_bi': _julia('JuliaMonoNerdFontMono-BoldItalic.ttf'),
     'noto': os.path.join(SOURCES, 'Noto-COLRv1.ttf'),
     'notosym2': os.path.join(SOURCES, 'NotoSansSymbols2-Regular.ttf'),
+    'notosym': os.path.join(SOURCES, 'NotoSansSymbols-Regular.ttf'),
 }
 
 # 成品字体里写入的许可信息（便于再分发时满足上游要求）
@@ -351,12 +352,15 @@ def prepare_emoji_presentation(base, julia, noto_cmap):
 
     copy_julia_into(base, julia, [], need_mono, False)
     base_cmap = base.getBestCmap()
-    rest = [cp for cp in need_mono if cp not in base_cmap]
-    if rest and os.path.exists(SRC['notosym2']):
-        sym = normalize_symbol_font(TTFont(SRC['notosym2']))
-        copy_julia_into(base, sym, [], rest, False, suffix='.sym')
-
-    base_cmap = base.getBestCmap()
+    # 单色轮廓的第二/第三来源（按优先级）：Noto Sans Symbols 2 -> Noto Sans Symbols
+    for key, suffix in (('notosym2', '.sym2'), ('notosym', '.sym')):
+        rest = [cp for cp in need_mono if cp not in base_cmap]
+        if not rest:
+            break
+        if os.path.exists(SRC[key]):
+            sym = normalize_symbol_font(TTFont(SRC[key]))
+            copy_julia_into(base, sym, [], rest, False, suffix=suffix)
+            base_cmap = base.getBestCmap()
     mono = {cp: base_cmap[cp] for cp in sorted(noto_cmap) if cp in pres and cp in base_cmap}
     drop = [cp for cp in need_mono if cp not in base_cmap]
     for cp in list(mono) + drop:

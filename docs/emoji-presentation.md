@@ -47,7 +47,7 @@ Unicode 给每个 emoji 字符定义了**默认呈现**（`Emoji_Presentation`�
 
 - 对每个"Noto 有、且默认是文本呈现"的码点，依次从
   **JuliaMono → Noto Sans Symbols 2** 拷一份单色轮廓进来；
-- 两者都没有的（27 个，基本都是 CJK 相关圈字 + 1 个 `U+1F549`）**直接丢弃** ——
+- 两者都没有的（26 个，全是 CJK 相关圈字与 Noto 内部私用区码点）**直接丢弃** ——
   与其留一个"看不见"的字符，不如让系统回退字体去兜底。
 
 ### 3.2 默认彩色呈现 → 把 cmap 让给 Noto
@@ -100,9 +100,12 @@ Unicode 给每个 emoji 字符定义了**默认呈现**（`Emoji_Presentation`�
 
 ## 5. 已知取舍
 
-- 丢弃的 **27 个码点**（见上）不再由本字体提供，改由系统回退链负责；
-  其中 26 个是 CJK 相关，1 个是 `U+1F549` OM SYMBOL。
-- 单色轮廓来自 JuliaMono / Noto Sans Symbols 2，风格与 base 不同
+- 丢弃的 **26 个码点** 不再由本字体提供，改由系统回退链负责：
+  `U+3030` `U+303D` `U+3297` `U+3299` `U+1F237`（CJK 类，唯一单色源是 Noto Sans CJK / Jigmo）
+  以及 21 个 Noto 内部私用区码点（`U+FE4E5`–`U+FE4EE`、`U+FE82C`、`U+FE82E`–`U+FE837`，
+  全系统只有 Noto Color Emoji 有）。
+  `U+1F549` OM SYMBOL 本来也在丢弃之列，现由 **Noto Sans Symbols** 补齐。
+- 单色轮廓来自 JuliaMono / Noto Sans Symbols 2 / Noto Sans Symbols，风格与 base 不同
   （例如 `©` 用的是 Julia 的无衬线版权符号）——这是"能看见"与"风格完全统一"之间的取舍。
 - 变体选择符的覆盖是"有单色有彩色才写 UVS"，所以 `😀` 这类没有单色版的
   字符不参与 VS15 切换。

@@ -14,6 +14,7 @@
 | `julia/JuliaMonoNerdFontMono-Italic.ttf` | Nerd Fonts | JuliaMono Nerd Font **Mono** Italic | 0.062 / NF 3.4.0 | OFL-1.1 |
 | `julia/JuliaMonoNerdFontMono-BoldItalic.ttf` | Nerd Fonts | JuliaMono Nerd Font **Mono** BoldItalic | 0.062 / NF 3.4.0 | OFL-1.1 |
 | `NotoSansSymbols2-Regular.ttf` | notofonts/symbols | Noto Sans Symbols 2 Regular | 2.008 | OFL-1.1 |
+| `NotoSansSymbols-Regular.ttf` | notofonts/symbols | Noto Sans Symbols Regular | 2.003 | OFL-1.1 |
 | `Noto-COLRv1.ttf` | noto-emoji | Noto Color Emoji（COLRv1 版） | 2.042 | OFL-1.1 |
 
 ## 重新获取
@@ -37,7 +38,8 @@ curl -fLo sources/Noto-COLRv1.ttf \
 如果不想在仓库里放 JuliaMono 副本，可以把 `sources/julia/` 删掉，
 `build.py` 会自动回退到系统已安装的 `juliamono-nerd/mono/` 目录（见 `SYSTEM_JULIA_DIRS`）。
 
-**Noto Sans Symbols 2**（给「默认文本呈现」的 emoji 补单色轮廓）：
+**Noto Sans Symbols / Noto Sans Symbols 2**（给「默认文本呈现」的 emoji 补单色轮廓；
+优先用 Symbols 2，其次 Symbols）：
 
 ```bash
 curl -fLo sources/NotoSansSymbols2-Regular.ttf \

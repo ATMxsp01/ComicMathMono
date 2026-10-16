@@ -39,7 +39,7 @@ Faces: **Regular, Bold, Italic, Bold Italic** (in [`dist/`](dist/)).
 
 ### Coverage
 
-Roughly **19,830** codepoints in the Regular face (Regular also carries the colour emoji):
+Roughly **19,832** codepoints in the Regular face (Regular also carries the colour emoji):
 
 | Area | Coverage |
 |---|---|
@@ -119,7 +119,7 @@ provenance and how to (re)download them.
 
 ### 覆盖范围
 
-Regular face 约 **19,830** 个码点（彩色 emoji 只在 Regular 里）：
+Regular face 约 **19,832** 个码点（彩色 emoji 只在 Regular 里）：
 
 | 类别 | 覆盖 |
 |---|---|

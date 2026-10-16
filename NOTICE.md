@@ -39,6 +39,12 @@ ComicMathMono 是**衍生作品**。`dist/` 下的成品字体和 `sources/` 下
 - 上游：<https://github.com/notofonts/symbols>
 - 版权：Copyright 2022 The Noto Project Authors
 
+### Noto Sans Symbols — SIL Open Font License 1.1
+- 用途：为极少数「默认文本呈现」的 emoji（如 `U+1F549` OM SYMBOL）补单色轮廓
+- 版本：`2.003`
+- 上游：<https://github.com/notofonts/symbols>
+- 版权：Copyright 2022 The Noto Project Authors
+
 ## 数据文件
 
 ### `data/emoji-data.txt` — Unicode License
@@ -71,5 +77,5 @@ SOFTWARE.
 
 ## SIL Open Font License 1.1
 
-适用于 JuliaMono、Noto Color Emoji、Noto Sans Symbols 2 部分，以及合并后的成品字体。
+适用于 JuliaMono、Noto Color Emoji、Noto Sans Symbols / Symbols 2 部分，以及合并后的成品字体。
 全文见 [`LICENSE-OFL-1.1.txt`](LICENSE-OFL-1.1.txt)。
