@@ -16,6 +16,7 @@ advance 规范：单格 550/1000upem；emoji 1100（两格）。CJK 不烤，走
 import copy
 import os
 import sys
+import unicodedata
 
 from fontTools.ttLib import TTFont, newTable
 from fontTools.pens.recordingPen import DecomposingRecordingPen
@@ -76,15 +77,49 @@ COPYRIGHT = (
 LICENSE_DESC = 'This Font Software is licensed under the SIL Open Font License, Version 1.1.'
 LICENSE_URL = 'https://scripts.sil.org/OFL'
 
-# Julia 层码点范围：希腊、数学、箭头、字母式、技术、盒线方块、盲文、文本符号
-JULIA_RANGES = [
+# ---------- Julia 层码点范围 ----------
+# Julia 优先（可覆盖 base 已有字形）：数学/符号区，保证技术符号风格统一
+JULIA_WIN_RANGES = [
     (0x0370, 0x03FF), (0x1F00, 0x1FFF), (0x2100, 0x214F), (0x2190, 0x21FF),
     (0x2200, 0x22FF), (0x2300, 0x23FF), (0x2500, 0x259F), (0x27C0, 0x27EF),
     (0x2800, 0x28FF), (0x2980, 0x29FF), (0x2A00, 0x2AFF),
 ]
-JULIA_EXTRA = [0x25CC, 0x2605, 0x2713, 0x2714, 0x2715, 0x2716, 0x2717, 0x279C]
-# Serious Shanns 缺拉丁扩展，斜体面由 Julia 补
-LATIN_FILL = [(0x00A0, 0x024F)]
+JULIA_WIN_EXTRA = [0x25CC, 0x2605, 0x2713, 0x2714, 0x2715, 0x2716, 0x2717, 0x279C]
+
+# 只补 base 缺失的码点（不覆盖 base 已有字形）：拉丁扩展 / 标点 / 其他字母文字
+JULIA_FILL_RANGES = [
+    # 拉丁 / 注音 / 修饰符
+    (0x00A0, 0x00FF), (0x0100, 0x024F), (0x0250, 0x02AF), (0x02B0, 0x02FF),
+    (0x1D00, 0x1D7F), (0x1D80, 0x1DBF), (0x1E00, 0x1EFF),
+    (0x2C60, 0x2C7F), (0xA720, 0xA7FF), (0xAB30, 0xAB6F), (0x10780, 0x107BF),
+    # 标点 / 上下标 / 货币 / 数字形式 / 控制图
+    (0x2000, 0x206F), (0x2070, 0x209F), (0x20A0, 0x20CF), (0x2150, 0x218F), (0x2400, 0x243F),
+    # 符号 / 几何 / 圈号 / 补充箭头 / 遗留计算 / 数学字母
+    (0x2460, 0x24FF), (0x25A0, 0x25FF), (0x2600, 0x26FF), (0x2700, 0x27BF),
+    (0x27F0, 0x27FF), (0x2900, 0x297F), (0x2B00, 0x2BFF), (0x2E00, 0x2E7F),
+    (0x1D400, 0x1D7FF), (0x1F100, 0x1F1FF), (0x1F650, 0x1F67F),
+    (0x1F780, 0x1F7FF), (0x1F800, 0x1F8FF), (0x1FB00, 0x1FBFF),
+    # Tier 2：其他字母文字
+    (0x0400, 0x052F), (0x1C80, 0x1C8F), (0x2DE0, 0x2DFF), (0xA640, 0xA69F),
+    (0x0530, 0x058F), (0x0590, 0x05FF), (0x0600, 0x06FF), (0x0750, 0x077F), (0x08A0, 0x08FF),
+    (0x10A0, 0x10FF), (0x1C90, 0x1CBF), (0x16A0, 0x16FF), (0x10C80, 0x10CFF),
+    (0x13A0, 0x13FF), (0xAB70, 0xABBF),
+]
+
+# 强制换成 Julia 版（覆盖 Comic/SeriousShanns）的数学/标点符号
+JULIA_FORCE = [0x00AC, 0x00B0, 0x00B1, 0x00D7, 0x00F7, 0x2020, 0x2021, 0x2026]
+
+# 组合重音符号：收录为 0 宽（advance=0）。
+# 说明：HarfBuzz 会先把「基字母 + 标记」合成预组合字形（有的话），只有无预组合形式的
+# 序列（如 q+U+0301）才会用到独立标记字形；此时 HarfBuzz 自带回退定位，会把标记挪回
+# 基字符所在格子，因此终端与浏览器都能正确叠加。详见 docs/combining-marks.md。
+JULIA_COMBINING_RANGES = [
+    (0x0300, 0x036F),   # Combining Diacritical Marks
+    (0x1AB0, 0x1AFF),   # Combining Diacritical Marks Extended
+    (0x1DC0, 0x1DFF),   # Combining Diacritical Marks Supplement
+    (0x20D0, 0x20FF),   # Combining Diacritical Marks for Symbols
+    (0xFE20, 0xFE2F),   # Combining Half Marks
+]
 
 
 # ---------- COLR/CPAL 合并支持 ----------
@@ -222,7 +257,7 @@ def set_cmap_entry(font, cp, name):
         t.cmap[cp] = name
 
 
-def copy_julia_into(base, julia, ranges, extra, overwrite):
+def copy_julia_into(base, julia, ranges, extra, overwrite, skip=None):
     jcmap = julia.getBestCmap()
     jglyf = julia['glyf']
     order = list(base.getGlyphOrder())
@@ -235,6 +270,8 @@ def copy_julia_into(base, julia, ranges, extra, overwrite):
     want.update(extra)
     copied = 0
     for cp in sorted(want):
+        if skip and cp in skip:
+            continue
         src_name = jcmap.get(cp)
         if src_name is None or src_name not in jglyf.glyphs:
             continue
@@ -257,6 +294,23 @@ def copy_julia_into(base, julia, ranges, extra, overwrite):
         copied += 1
     base.setGlyphOrder(order)
     return copied
+
+
+def zero_width_marks(font):
+    """把 Mn/Me 组合标记的 advance 设为 0（它们默认要叠加在前一个字符上）。"""
+    cmap = font.getBestCmap()
+    n = 0
+    for cp, gname in cmap.items():
+        if unicodedata.category(chr(cp)) not in ('Mn', 'Me'):
+            continue
+        if gname not in font['hmtx'].metrics:
+            continue
+        m = list(font['hmtx'].metrics[gname])
+        if m[0] != 0:
+            m[0] = 0
+            font['hmtx'].metrics[gname] = tuple(m)
+            n += 1
+    return n
 
 
 def strip_locl(font):
@@ -350,7 +404,7 @@ def set_face_meta(font, subfamily, weight, bold, italic):
 
 # ---------- 主流程 ----------
 
-def build_face(style, base_key, julia_key, emoji, overwrite, latin_fill):
+def build_face(style, base_key, julia_key, emoji, overwrite):
     print(f'── 构建 {style} ──')
     base = TTFont(SRC[base_key])
     julia = TTFont(SRC[julia_key])
@@ -363,12 +417,15 @@ def build_face(style, base_key, julia_key, emoji, overwrite, latin_fill):
         adv_a = base.getGlyphSet()['A'].width
         base = flatten_scale_font(base, CELL / adv_a, upem_factor=1.0, uniform_advance=CELL)
 
-    ranges = list(JULIA_RANGES)
-    extra = list(JULIA_EXTRA)
-    if latin_fill:
-        ranges = LATIN_FILL + ranges
-    n = copy_julia_into(base, julia, ranges, extra, overwrite)
-    print(f'  Julia 层拷入 {n} 个码点')
+    # Noto(emoji) 已有的码点不要用 Julia 覆盖，否则会把彩色 emoji 变成单色符号
+    noto_cmap = set(TTFont(SRC['noto']).getBestCmap().keys())
+
+    n = copy_julia_into(base, julia, JULIA_WIN_RANGES, JULIA_WIN_EXTRA, overwrite)
+    n += copy_julia_into(base, julia, JULIA_FILL_RANGES, [], False, skip=noto_cmap)
+    n += copy_julia_into(base, julia, JULIA_COMBINING_RANGES, [], False, skip=noto_cmap)
+    n += copy_julia_into(base, julia, [], JULIA_FORCE, True)
+    z = zero_width_marks(base)
+    print(f'  Julia 层拷入 {n} 个码点（其中组合标记 0 宽化 {z} 个）')
 
     if emoji:
         noto = TTFont(SRC['noto'])
@@ -407,10 +464,10 @@ def main():
         return 1
     os.makedirs(DIST, exist_ok=True)
     os.makedirs(TMP, exist_ok=True)
-    build_face('Regular', 'comic_r', 'julia_r', emoji=True, overwrite=True, latin_fill=False)
-    build_face('Bold', 'comic_b', 'julia_b', emoji=False, overwrite=True, latin_fill=False)
-    build_face('Italic', 'ssh_i', 'julia_i', emoji=False, overwrite=False, latin_fill=True)
-    build_face('Bold Italic', 'ssh_bi', 'julia_bi', emoji=False, overwrite=False, latin_fill=True)
+    build_face('Regular', 'comic_r', 'julia_r', emoji=True, overwrite=True)
+    build_face('Bold', 'comic_b', 'julia_b', emoji=False, overwrite=True)
+    build_face('Italic', 'ssh_i', 'julia_i', emoji=False, overwrite=False)
+    build_face('Bold Italic', 'ssh_bi', 'julia_bi', emoji=False, overwrite=False)
     print(f'全部完成 → {DIST}')
     return 0
 

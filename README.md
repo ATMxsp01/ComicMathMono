@@ -21,11 +21,36 @@ Faces: **Regular, Bold, Italic, Bold Italic** (in [`dist/`](dist/)).
 
 ### Design
 
-- **1000 upem**, single cell = **550**; emoji = **1100** (exactly two cells).
+- **1000 upem**, single cell = **550**; emoji = **1100** (exactly two cells); combining marks = **0**.
 - CJK is intentionally **not** baked in — leave it to the terminal's fontconfig fallback chain.
 - Emoji are merged with `fontTools`' `Merger`. The bogus `locl` feature that `Merger` synthesizes
   for duplicate codepoints is removed, so digits/symbols are not swapped out in Latin runs.
   The whole story is in [`docs/locl-issue.md`](docs/locl-issue.md).
+- Combining marks (accents, Hebrew points, Arabic harakat, …) are included as **zero-width**
+  glyphs, so decomposed text renders without tofu in both terminals and browsers —
+  see [`docs/combining-marks.md`](docs/combining-marks.md).
+
+### Coverage
+
+Roughly **19,800** codepoints in the Regular face (Regular also carries the colour emoji):
+
+| Area | Coverage |
+|---|---|
+| ASCII letters & punctuation | 100% |
+| Latin-1 / Latin Extended A–B | ~100% |
+| IPA, spacing modifiers, phonetic extensions | 100% |
+| Latin Extended Additional / C / D / E | 100% |
+| Greek, Cyrillic | 100% |
+| Combining marks | yes (zero-width) |
+| Punctuation, super/subscripts, currency, number forms | ~99% |
+| Arrows, math operators, misc math, **math alphanumerics** | 100% |
+| Technical, box drawing, blocks, geometric shapes | 100% |
+| Misc symbols, dingbats, enclosed alphanumerics, legacy computing | 100% |
+| Braille | 100% |
+| Nerd Font icons (incl. plane-15 Material Design Icons) | 100% |
+| Colour emoji (Noto COLRv1) | 100% of source |
+| Hebrew / Arabic | partial (JuliaMono's coverage) |
+| CJK | **not included** (by design) |
 
 ### Install
 
@@ -72,10 +97,34 @@ provenance and how to (re)download them.
 
 ### 设计要点
 
-- **1000 upem，单格 550**；emoji **1100**（两格）。CJK **不烤进字体**，交给终端 fontconfig 回退链。
+- **1000 upem，单格 550**；emoji **1100**（两格）；组合标记 **0 宽**。CJK **不烤进字体**，交给终端 fontconfig 回退链。
 - emoji 用 `fontTools` 的 `Merger` 合并；合并器会自动合成一条 `locl`，我们把它删掉了，
   否则它在拉丁文片段里会把 ASCII 数字/空格换成 Noto 的空/宽字形（表现为「数字消失」）。
   完整来龙去脉见 [`docs/locl-issue.md`](docs/locl-issue.md)。
+- 组合重音符号（重音、希伯来元音点、阿拉伯元音符号等）以 **0 宽** 收录，
+  分解写法在终端与浏览器里都不会出现「豆腐块」，见 [`docs/combining-marks.md`](docs/combining-marks.md)。
+
+### 覆盖范围
+
+Regular face 约 **19,800** 个码点（彩色 emoji 只在 Regular 里）：
+
+| 类别 | 覆盖 |
+|---|---|
+| ASCII 字母与标点 | 100% |
+| Latin-1 / 拉丁扩展 A–B | ~100% |
+| IPA、修饰符、注音扩展 | 100% |
+| 拉丁扩展 Additional / C / D / E | 100% |
+| 希腊、西里尔 | 100% |
+| 组合重音符号 | 已收录（0 宽） |
+| 标点、上下标、货币、数字形式 | ~99% |
+| 箭头、数学运算符、杂项数学、**数学字母数字** | 100% |
+| 技术符号、盒线、块元素、几何图形 | 100% |
+| 杂项符号、装饰、圈号、遗留计算块 | 100% |
+| 盲文 | 100% |
+| Nerd Font 图标（含平面 15 Material Design Icons） | 100% |
+| 彩色 emoji（Noto COLRv1） | 源字体的 100% |
+| 希伯来 / 阿拉伯 | 部分（JuliaMono 覆盖多少就多少） |
+| CJK | **不含**（有意为之） |
 
 ### 安装
 
