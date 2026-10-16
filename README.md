@@ -43,7 +43,11 @@ Faces: **Regular, Bold, Italic, Bold Italic** (in [`dist/`](dist/)).
 
 ### Coverage
 
-Roughly **19,855** codepoints in the Regular face (Regular also carries the colour emoji):
+The font is defined as **ComicShannsMono ⊎ JuliaMono Nerd Font Mono ⊎ Noto Color Emoji**, and
+`tools/verify.py` asserts it *is* a superset of every source it is built from — that is the
+property which lets the fallback chain below be empty of the two source families.
+
+**22,534** codepoints in every face (all four faces carry the colour emoji and the UVS table):
 
 | Area | Coverage |
 |---|---|
@@ -59,10 +63,33 @@ Roughly **19,855** codepoints in the Regular face (Regular also carries the colo
 | Misc symbols, dingbats, enclosed alphanumerics, legacy computing | 100% |
 | Braille | 100% |
 | Nerd Font icons (incl. plane-15 Material Design Icons) | 100% |
-| Colour emoji (Noto COLRv1) | 100% of source |
+| Colour emoji (Noto COLRv1) | 100% of source — in **all four** faces |
 | Emoji presentation (VS15 / VS16) | implemented — 224 real UVS variants each way |
 | Hebrew / Arabic | partial (JuliaMono's coverage) |
 | CJK | **not included** (by design) |
+
+### Recommended fontconfig fallback chain
+
+Because ComicMathMono absorbs both upstream monospace families, the `monospace` chain only
+needs to keep what genuinely lies outside this font (CJK) plus an emoji safety net:
+
+```xml
+<match target="pattern">
+    <test qual="any" name="family"><string>monospace</string></test>
+    <edit name="family" mode="prepend" binding="strong">
+        <string>ComicMathMono</string>       <!-- 1. main font (emoji in all four weights) -->
+        <string>Noto Color Emoji</string>    <!-- 2. only for the 26 codepoints left out on purpose -->
+        <string>Sarasa Mono SC</string>      <!-- 3. CJK, monospaced -->
+        <string>Jigmo</string>               <!-- 4. rare ideographs URO/ExtA   -->
+        <string>Jigmo2</string>              <!-- 5. rare ideographs ExtB~F/I  -->
+        <string>Jigmo3</string>              <!-- 6. rare ideographs ExtG/H/J  -->
+    </edit>
+</match>
+```
+
+This replaces a chain that had to carry `ComicShannsMono Nerd Font Mono` and
+`JuliaMono Nerd Font Mono` — both are provably redundant now (measured coverage gap: **0**
+codepoints for each).
 
 ### Install
 
@@ -118,6 +145,8 @@ documented in [`docs/`](docs/) (see the CI workflow in [`.github/workflows/build
 - **Marks do not stack**: GPOS mark-to-base is provided, but not mark-to-mark, so a base with
   two combining marks shows them overlapping rather than stacked higher.
 - **Colour emoji need COLRv1** support in the renderer (kitty, Chromium, Firefox 116+, …).
+  Emoji are present in all four faces, so bold/italic prose does not fall back to a
+  different emoji font either.
 - Source fonts are snapshotted (`sources/README.md`); newer Nerd Font / Noto releases bring
   new glyphs.
 
@@ -157,7 +186,11 @@ documented in [`docs/`](docs/) (see the CI workflow in [`.github/workflows/build
 
 ### 覆盖范围
 
-Regular face 约 **19,855** 个码点（彩色 emoji 只在 Regular 里）：
+本字体定义为 **ComicShannsMono ⊎ JuliaMono Nerd Font Mono ⊎ Noto Color Emoji**，
+`tools/verify.py` 会断言它确实是所有上游源字体的**超集** —— 正是这条性质让下面的 fallback
+链可以不再保留那两个上游等宽字族。
+
+**四个 face 各 22,534 个码点**（四个字重都带彩色 emoji 与 UVS 表）：
 
 | 类别 | 覆盖 |
 |---|---|
@@ -173,10 +206,32 @@ Regular face 约 **19,855** 个码点（彩色 emoji 只在 Regular 里）：
 | 杂项符号、装饰、圈号、遗留计算块 | 100% |
 | 盲文 | 100% |
 | Nerd Font 图标（含平面 15 Material Design Icons） | 100% |
-| 彩色 emoji（Noto COLRv1） | 源字体的 100% |
+| 彩色 emoji（Noto COLRv1） | 源字体的 100%，**四个字重都有** |
 | emoji 默认呈现与 VS15/VS16 | 已实现（各 224 条真 UVS） |
 | 希伯来 / 阿拉伯 | 部分（JuliaMono 覆盖多少就多少） |
 | CJK | **不含**（有意为之） |
+
+### 推荐的 fontconfig fallback 链
+
+因为 ComicMathMono 已经把两个上游等宽字族都吸收进来了，`monospace` 链只需要保留真正在本字体
+之外的东西（CJK）+ 一个 emoji 安全网：
+
+```xml
+<match target="pattern">
+    <test qual="any" name="family"><string>monospace</string></test>
+    <edit name="family" mode="prepend" binding="strong">
+        <string>ComicMathMono</string>       <!-- 1. 主字体（四个字重都带 emoji） -->
+        <string>Noto Color Emoji</string>    <!-- 2. 只兜那 26 个故意未收录的码点 -->
+        <string>Sarasa Mono SC</string>      <!-- 3. 等宽中文 -->
+        <string>Jigmo</string>               <!-- 4. 生僻字 URO/ExtA  -->
+        <string>Jigmo2</string>              <!-- 5. 生僻字 ExtB~F/I -->
+        <string>Jigmo3</string>              <!-- 6. 生僻字 ExtG/H/J  -->
+    </edit>
+</match>
+```
+
+原来的链里还要写 `ComicShannsMono Nerd Font Mono` 和 `JuliaMono Nerd Font Mono` ——
+现在两者都是**可证明冗余**的（实测覆盖缺口各为 **0** 个码点）。
 
 ### 安装
 

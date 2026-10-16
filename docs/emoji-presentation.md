@@ -105,6 +105,17 @@ Unicode 给每个 emoji 字符定义了**默认呈现**（`Emoji_Presentation`�
 如果 Unicode 数据比源字体旧，新 emoji 会被误判成"需要单色轮廓"而被丢弃 ——
 所幸 2026-01-30 版的 emoji-data 已经把这些码点标成 `Emoji_Presentation=Yes`。
 
+## 4c. 四个字重都带 emoji
+
+最初只有 Regular 面合并彩色 emoji，Bold/Italic 靠系统的 Noto Color Emoji 兜底。这有两个问题：
+
+- **粗体/斜体里 VS15/VS16 切换失效** —— Bold 面既没有彩色字形也没有 UVS 表，
+  `☀` + U+FE0F 只能显示成它自己的单色字形；
+- 依赖系统装有 emoji 字体。
+
+现在四个 face 都跑同一套 emoji 合并，`tools/verify.py` 会断言每个 face 里
+**1228 个「默认彩色」码点全部指向彩色字形**。代价是体积（每面约 8.2 MB）。
+
 ## 5. 已知取舍
 
 - 丢弃的 **26 个码点** 不再由本字体提供，改由系统回退链负责：

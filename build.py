@@ -647,6 +647,10 @@ def build_face(style, base_key, julia_key, emoji, overwrite):
     n += copy_julia_into(base, julia, JULIA_FILL_RANGES, [], False, skip=noto_cmap)
     n += copy_julia_into(base, julia, JULIA_COMBINING_RANGES, [], False, skip=noto_cmap)
     n += copy_julia_into(base, julia, [], JULIA_FORCE, True)
+    # 全量吸收 JuliaMono 剩下的码点（跳过 Noto 覆盖的彩色 emoji）：
+    # 这样本字体就是 ComicShanns ∪ JuliaMono ∪ NotoEmoji，fallback 链里不需要 JuliaMono 了
+    julia_all = [cp for cp in julia.getBestCmap() if cp not in noto_cmap]
+    n += copy_julia_into(base, julia, [], julia_all, False, skip=noto_cmap)
     z = zero_width_marks(base)
     print(f'  Julia 层拷入 {n} 个码点（其中组合标记 0 宽化 {z} 个）')
 
@@ -699,10 +703,12 @@ def main():
         return 1
     os.makedirs(DIST, exist_ok=True)
     os.makedirs(TMP, exist_ok=True)
+    # 四个 face 都带彩色 emoji：否则粗体/斜体里的 emoji 要靠系统 Noto Color Emoji 兜底，
+    # 而且粗体里 VS15/VS16 切换会失效（Bold 面没有彩色字形也没有 UVS）
     build_face('Regular', 'comic_r', 'julia_r', emoji=True, overwrite=True)
-    build_face('Bold', 'comic_b', 'julia_b', emoji=False, overwrite=True)
-    build_face('Italic', 'ssh_i', 'julia_i', emoji=False, overwrite=False)
-    build_face('Bold Italic', 'ssh_bi', 'julia_bi', emoji=False, overwrite=False)
+    build_face('Bold', 'comic_b', 'julia_b', emoji=True, overwrite=True)
+    build_face('Italic', 'ssh_i', 'julia_i', emoji=True, overwrite=False)
+    build_face('Bold Italic', 'ssh_bi', 'julia_bi', emoji=True, overwrite=False)
     print(f'全部完成 → {DIST}')
     return 0
 
