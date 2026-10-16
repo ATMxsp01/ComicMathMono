@@ -22,6 +22,7 @@ from fontTools.ttLib import TTFont, newTable
 from fontTools.pens.recordingPen import DecomposingRecordingPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.merge import Merger
+from fontTools.merge.unicode import is_Default_Ignorable
 import fontTools.ttLib as ttLib
 from fontTools.ttLib.tables.C_O_L_R_ import table_C_O_L_R_
 from fontTools.ttLib.tables.C_P_A_L_ import table_C_P_A_L_
@@ -42,6 +43,9 @@ SYSTEM_JULIA_DIRS = [
     '/usr/share/fonts/TTF/juliamono-nerd/mono',
     os.path.expanduser('~/.local/share/fonts/juliamono-nerd/mono'),
 ]
+
+
+EMOJI_DATA = os.path.join(ROOT, 'data', 'emoji-data.txt')   # Unicode emoji 属性表
 
 
 def _julia(name):
@@ -65,6 +69,7 @@ SRC = {
     'julia_i': _julia('JuliaMonoNerdFontMono-Italic.ttf'),
     'julia_bi': _julia('JuliaMonoNerdFontMono-BoldItalic.ttf'),
     'noto': os.path.join(SOURCES, 'Noto-COLRv1.ttf'),
+    'notosym2': os.path.join(SOURCES, 'NotoSansSymbols2-Regular.ttf'),
 }
 
 # 成品字体里写入的许可信息（便于再分发时满足上游要求）
@@ -257,7 +262,7 @@ def set_cmap_entry(font, cp, name):
         t.cmap[cp] = name
 
 
-def copy_julia_into(base, julia, ranges, extra, overwrite, skip=None):
+def copy_julia_into(base, julia, ranges, extra, overwrite, skip=None, suffix='.julia'):
     jcmap = julia.getBestCmap()
     jglyf = julia['glyf']
     order = list(base.getGlyphOrder())
@@ -285,7 +290,7 @@ def copy_julia_into(base, julia, ranges, extra, overwrite, skip=None):
         else:
             dst_name = src_name
             if dst_name in glyfs:
-                dst_name = src_name + '.julia'
+                dst_name = src_name + suffix
         if dst_name not in order:
             order.append(dst_name)
         glyfs[dst_name] = copy.deepcopy(g)
@@ -294,6 +299,122 @@ def copy_julia_into(base, julia, ranges, extra, overwrite, skip=None):
         copied += 1
     base.setGlyphOrder(order)
     return copied
+
+
+# ---------- emoji 呈现：默认文本 / 默认彩色 / VS15 / VS16 ----------
+
+def load_emoji_presentation(path=EMOJI_DATA):
+    """Emoji_Presentation=Yes 的码点集合（来自 Unicode emoji-data.txt）。"""
+    out = set()
+    if not os.path.exists(path):
+        return out
+    with open(path, encoding='utf-8') as fh:
+        for line in fh:
+            line = line.split('#')[0].strip()
+            if not line:
+                continue
+            rng, prop = (x.strip() for x in line.split(';'))
+            if prop != 'Emoji_Presentation':
+                continue
+            a, b = (int(x, 16) for x in rng.split('..')) if '..' in rng else (int(rng, 16),) * 2
+            out.update(range(a, b + 1))
+    return out
+
+
+def normalize_symbol_font(font):
+    """把任意 upem 的符号字体缩放到 1000 upem、单格 advance。"""
+    factor = 1000.0 / font['head'].unitsPerEm
+    return flatten_scale_font(font, factor, upem_factor=factor, uniform_advance=CELL)
+
+
+def drop_cmap_entry(font, cp):
+    """从所有普通 cmap 子表里删掉一个码点（UVS 子表不动）。"""
+    for t in font['cmap'].tables:
+        if t.format == 14 or not hasattr(t, 'cmap'):
+            continue
+        t.cmap.pop(cp, None)
+
+
+def prepare_emoji_presentation(base, julia, noto_cmap):
+    """按 Unicode 的默认呈现规则整理 emoji 码点（必须在合并 Noto 之前跑）。
+
+    · 默认**文本**呈现（Emoji_Presentation != Yes）：必须提供单色轮廓，否则
+      文本渲染只会画出空轮廓 —— 表现为"字符整个消失"。轮廓依次取
+      JuliaMono → Noto Sans Symbols 2；都取不到的（都是 CJK 相关圈字）直接丢弃。
+    · 默认**彩色**呈现：把 base 的 cmap 让出来，让 Noto 的彩色字形占住；
+      base 原有的单色字形留给 VS15 使用。
+    """
+    pres = load_emoji_presentation()
+    # 不可见字符（Tag 字符、变体选择符等）不能丢：标签序列旗帜要靠它们合成
+    need_mono = sorted(cp for cp in noto_cmap
+                       if cp not in pres and not is_Default_Ignorable(cp))
+
+    copy_julia_into(base, julia, [], need_mono, False)
+    base_cmap = base.getBestCmap()
+    rest = [cp for cp in need_mono if cp not in base_cmap]
+    if rest and os.path.exists(SRC['notosym2']):
+        sym = normalize_symbol_font(TTFont(SRC['notosym2']))
+        copy_julia_into(base, sym, [], rest, False, suffix='.sym')
+
+    base_cmap = base.getBestCmap()
+    mono = {cp: base_cmap[cp] for cp in sorted(noto_cmap) if cp in pres and cp in base_cmap}
+    drop = [cp for cp in need_mono if cp not in base_cmap]
+    for cp in list(mono) + drop:
+        drop_cmap_entry(base, cp)
+    print(f'  emoji 呈现：默认彩色 {len(mono)} 个交还 Noto；无单色源丢弃 {len(drop)} 个')
+    return {'text': need_mono, 'mono': mono, 'drop': drop}
+
+
+def _set_uvs(font, fe0f, fe0e):
+    """写入 cmap format 14（Unicode 变体序列）表。"""
+    uvs = {}
+    if fe0f:
+        uvs[0xFE0F] = fe0f
+    if fe0e:
+        uvs[0xFE0E] = fe0e
+    if not uvs:
+        return
+    for t in font['cmap'].tables:
+        if t.format == 14:
+            t.uvsDict = uvs
+            return
+    from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
+    t = CmapSubtable.newSubtable(14)
+    t.platformID, t.platEncID, t.language = 0, 5, 0
+    t.cmap, t.uvsDict = {}, uvs
+    font['cmap'].tables.append(t)
+
+
+def apply_emoji_presentation(font, noto, plan):
+    """合并之后：丢弃无单色源的码点，并生成真正的 UVS（VS15/VS16）表。"""
+    for cp in plan['drop']:
+        drop_cmap_entry(font, cp)
+    noto_cmap = noto.getBestCmap()
+    colr_base = set(r.BaseGlyph for r in font['COLR'].table.BaseGlyphList.BaseGlyphPaintRecord)
+
+    def find_colour(cp):
+        n = noto_cmap.get(cp)
+        if n is None:
+            return None
+        for cand in (n, n + '.1', n + '.2', n + '.3'):
+            if cand in colr_base:
+                return cand
+        return None
+
+    cmap = font.getBestCmap()
+    pairs = {}
+    for cp in plan['text']:
+        mono, colr = cmap.get(cp), find_colour(cp)
+        if mono and colr and mono != colr:
+            pairs[cp] = (mono, colr)
+    for cp, mono in plan['mono'].items():
+        colr = cmap.get(cp)
+        if colr and mono != colr:
+            pairs[cp] = (mono, colr)
+
+    _set_uvs(font, sorted((cp, c) for cp, (m, c) in pairs.items()),
+             sorted((cp, m) for cp, (m, c) in pairs.items()))
+    print(f'  UVS：VS16(强制彩色) {len(pairs)} 条，VS15(强制文本) {len(pairs)} 条')
 
 
 def zero_width_marks(font):
@@ -400,7 +521,21 @@ def revive_renamed_rules(font, noto):
     return len(mapping)
 
 
-def merge_noto_emoji(base, noto):
+def fix_colr_renames(font, base_names):
+    """Merger 会把「base 与 Noto 同名」的字形改名成 X.1，COLR 的引用必须跟着走，
+    否则彩色图层会挂到 base 的单色字形上（或指向空轮廓）。
+    方向与 ``revive_renamed_rules`` 相反：那里把 X.N 收回 cmap 可达的 X，
+    这里要把 Noto 的 X 推到它改名后的 X.N。"""
+    if 'COLR' not in font:
+        return 0
+    order = set(font.getGlyphOrder())
+    mapping = {n: n + '.1' for n in base_names if n + '.1' in order}
+    if mapping:
+        _remap_names(font['COLR'].table, mapping)
+    return len(mapping)
+
+
+def merge_noto_emoji(base, noto, base_names):
     """把 Noto COLRv1 整字体合并进 base（base 已有码点优先，Noto 填 emoji）。"""
     base_path = os.path.join(TMP, '_base_tmp.ttf')
     noto_path = os.path.join(TMP, '_noto_tmp.ttf')
@@ -409,9 +544,9 @@ def merge_noto_emoji(base, noto):
     merger = Merger()
     font = merger.merge([base_path, noto_path])
     n = revive_renamed_rules(font, noto)
-    if n:
-        print(f'  修复被改名失效的排版规则引用: {n} 个字形')
+    c = fix_colr_renames(font, base_names)
     strip_locl(font)
+    print(f'  修复改名失效的引用：排版规则 {n} 个，COLR 图层 {c} 个')
     return font
 
 
@@ -468,12 +603,15 @@ def build_face(style, base_key, julia_key, emoji, overwrite):
     print(f'  Julia 层拷入 {n} 个码点（其中组合标记 0 宽化 {z} 个）')
 
     if emoji:
+        plan = prepare_emoji_presentation(base, julia, noto_cmap)
+        base_names = set(base.getGlyphOrder())
         noto = TTFont(SRC['noto'])
         noto = flatten_scale_font(noto, WIDE / 1024, upem_factor=1000 / 1024, uniform_advance=WIDE)
         for tag in ('vhea', 'vmtx'):
             if tag in noto:
                 del noto[tag]
-        font = merge_noto_emoji(base, noto)
+        font = merge_noto_emoji(base, noto, base_names)
+        apply_emoji_presentation(font, noto, plan)
         print(f'  emoji 层合并完成，glyph 数: {len(font.getGlyphOrder())}')
     else:
         font = base

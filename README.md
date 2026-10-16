@@ -32,10 +32,14 @@ Faces: **Regular, Bold, Italic, Bold Italic** (in [`dist/`](dist/)).
 - The `Merger`'s glyph renaming would otherwise kill layout rules that reference the renamed
   duplicates (colour keycap emoji `1️⃣` were the visible casualty); `revive_renamed_rules()`
   repairs those references — see [`docs/merge-renaming.md`](docs/merge-renaming.md).
+- **Emoji presentation follows Unicode**: text-default characters (© ® ▪ ☀ ❤ …) carry a
+  monochrome outline and switch to colour with VS16; colour-default ones (⌚ ⏰ ⏩ …) carry the
+  colour glyph and switch to monochrome with VS15. A real cmap format-14 UVS table is generated
+  (223 variants each way) — see [`docs/emoji-presentation.md`](docs/emoji-presentation.md).
 
 ### Coverage
 
-Roughly **19,800** codepoints in the Regular face (Regular also carries the colour emoji):
+Roughly **19,830** codepoints in the Regular face (Regular also carries the colour emoji):
 
 | Area | Coverage |
 |---|---|
@@ -52,6 +56,7 @@ Roughly **19,800** codepoints in the Regular face (Regular also carries the colo
 | Braille | 100% |
 | Nerd Font icons (incl. plane-15 Material Design Icons) | 100% |
 | Colour emoji (Noto COLRv1) | 100% of source |
+| Emoji presentation (VS15 / VS16) | implemented — 223 real UVS variants each way |
 | Hebrew / Arabic | partial (JuliaMono's coverage) |
 | CJK | **not included** (by design) |
 
@@ -104,6 +109,9 @@ provenance and how to (re)download them.
 - emoji 用 `fontTools` 的 `Merger` 合并；合并器会自动合成一条 `locl`，我们把它删掉了，
   否则它在拉丁文片段里会把 ASCII 数字/空格换成 Noto 的空/宽字形（表现为「数字消失」）。
   完整来龙去脉见 [`docs/locl-issue.md`](docs/locl-issue.md)。
+- emoji 的**默认呈现**按 Unicode 规则实现：文本默认的符号（© ® ▪ ☀ ❤…）给**单色轮廓**（VS16 切彩色），
+  彩色默认的（⌚ ⏰ ⏩…）给**彩色字形**（VS15 切单色），并写入真正的 cmap format 14 变体表，
+  见 [`docs/emoji-presentation.md`](docs/emoji-presentation.md)。
 - 组合重音符号（重音、希伯来元音点、阿拉伯元音符号等）以 **0 宽** 收录，
   分解写法在终端与浏览器里都不会出现「豆腐块」，见 [`docs/combining-marks.md`](docs/combining-marks.md)。
 - `Merger` 重命名字形会导致引用它的排版规则失效（受害者是彩色键盘帽 `1️⃣`），
@@ -111,7 +119,7 @@ provenance and how to (re)download them.
 
 ### 覆盖范围
 
-Regular face 约 **19,800** 个码点（彩色 emoji 只在 Regular 里）：
+Regular face 约 **19,830** 个码点（彩色 emoji 只在 Regular 里）：
 
 | 类别 | 覆盖 |
 |---|---|
@@ -128,6 +136,7 @@ Regular face 约 **19,800** 个码点（彩色 emoji 只在 Regular 里）：
 | 盲文 | 100% |
 | Nerd Font 图标（含平面 15 Material Design Icons） | 100% |
 | 彩色 emoji（Noto COLRv1） | 源字体的 100% |
+| emoji 默认呈现与 VS15/VS16 | 已实现（各 223 条真 UVS） |
 | 希伯来 / 阿拉伯 | 部分（JuliaMono 覆盖多少就多少） |
 | CJK | **不含**（有意为之） |
 

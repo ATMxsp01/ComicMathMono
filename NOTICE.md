@@ -33,6 +33,20 @@ ComicMathMono 是**衍生作品**。`dist/` 下的成品字体和 `sources/` 下
 
 > 依 OFL-1.1 要求，本衍生字体已**重命名**（`ComicMathMono`），不使用任何上游保留字体名。
 
+### Noto Sans Symbols 2 — SIL Open Font License 1.1
+- 用途：为「默认文本呈现」的 emoji 字符补单色轮廓（否则这些字符文本渲染会空白）
+- 版本：`2.008`
+- 上游：<https://github.com/notofonts/symbols>
+- 版权：Copyright 2022 The Noto Project Authors
+
+## 数据文件
+
+### `data/emoji-data.txt` — Unicode License
+- 来源：<https://unicode.org/Public/UCD/latest/ucd/emoji/emoji-data.txt>
+- 用途：判定每个码点的默认呈现（`Emoji_Presentation`），构建时据此决定
+  「给单色轮廓」还是「给彩色字形」
+- 版权：© Unicode, Inc.；依 Unicode License v3 分发（文件头部保留原始声明）
+
 ## MIT License（适用于 ComicShannsMono / SeriousShanns 部分）
 
 ```
@@ -57,5 +71,5 @@ SOFTWARE.
 
 ## SIL Open Font License 1.1
 
-适用于 JuliaMono、Noto Color Emoji 部分，以及合并后的成品字体。
+适用于 JuliaMono、Noto Color Emoji、Noto Sans Symbols 2 部分，以及合并后的成品字体。
 全文见 [`LICENSE-OFL-1.1.txt`](LICENSE-OFL-1.1.txt)。
