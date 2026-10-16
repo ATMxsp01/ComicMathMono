@@ -77,7 +77,7 @@ Unicode 给每个 emoji 字符定义了**默认呈现**（`Emoji_Presentation`�
 (cp, U+FE0E) -> 单色字形    # 强制文本呈现
 ```
 
-各 **223 条**。于是：
+各 **224 条**。于是：
 
 | 输入 | 结果 |
 |---|---|
@@ -97,6 +97,13 @@ Unicode 给每个 emoji 字符定义了**默认呈现**（`Emoji_Presentation`�
 修正：`prepare_emoji_presentation()` 用
 `fontTools.merge.unicode.is_Default_Ignorable()` 把这类字符排除在"需要单色轮廓"之外。
 修完之后标签旗恢复成 1 个字形。
+
+## 4b. 源字体版本
+
+彩色 emoji 来自 Noto Color Emoji 的 COLRv1 版，本项目快照为 **2.057（Unicode 18.0，2026-09）**，
+比 2.042 多 **23 个码点**。升级时要注意：新 emoji 的默认呈现要查 `data/emoji-data.txt`，
+如果 Unicode 数据比源字体旧，新 emoji 会被误判成"需要单色轮廓"而被丢弃 ——
+所幸 2026-01-30 版的 emoji-data 已经把这些码点标成 `Emoji_Presentation=Yes`。
 
 ## 5. 已知取舍
 

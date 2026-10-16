@@ -1,0 +1,33 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 构建
+        run: python3 build.py
+
+      - name: 回归校验
+        run: python3 tools/verify.py
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ComicMathMono
+          path: dist/*.ttf
+          if-no-files-found: error

@@ -15,6 +15,7 @@ advance 规范：单格 550/1000upem；emoji 1100（两格）。CJK 不烤，走
 """
 import copy
 import os
+import re
 import sys
 import unicodedata
 
@@ -336,6 +337,21 @@ def drop_cmap_entry(font, cp):
         t.cmap.pop(cp, None)
 
 
+def fill_mono_symbols(base, julia, need_mono):
+    """依次从 JuliaMono → Noto Sans Symbols 2 → Noto Sans Symbols 补单色轮廓。"""
+    copy_julia_into(base, julia, [], need_mono, False)
+    base_cmap = base.getBestCmap()
+    for key, suffix in (('notosym2', '.sym2'), ('notosym', '.sym')):
+        rest = [cp for cp in need_mono if cp not in base_cmap]
+        if not rest:
+            break
+        if os.path.exists(SRC[key]):
+            sym = normalize_symbol_font(TTFont(SRC[key]))
+            copy_julia_into(base, sym, [], rest, False, suffix=suffix)
+            base_cmap = base.getBestCmap()
+    return base_cmap
+
+
 def prepare_emoji_presentation(base, julia, noto_cmap):
     """按 Unicode 的默认呈现规则整理 emoji 码点（必须在合并 Noto 之前跑）。
 
@@ -350,17 +366,7 @@ def prepare_emoji_presentation(base, julia, noto_cmap):
     need_mono = sorted(cp for cp in noto_cmap
                        if cp not in pres and not is_Default_Ignorable(cp))
 
-    copy_julia_into(base, julia, [], need_mono, False)
-    base_cmap = base.getBestCmap()
-    # 单色轮廓的第二/第三来源（按优先级）：Noto Sans Symbols 2 -> Noto Sans Symbols
-    for key, suffix in (('notosym2', '.sym2'), ('notosym', '.sym')):
-        rest = [cp for cp in need_mono if cp not in base_cmap]
-        if not rest:
-            break
-        if os.path.exists(SRC[key]):
-            sym = normalize_symbol_font(TTFont(SRC[key]))
-            copy_julia_into(base, sym, [], rest, False, suffix=suffix)
-            base_cmap = base.getBestCmap()
+    base_cmap = fill_mono_symbols(base, julia, need_mono)
     mono = {cp: base_cmap[cp] for cp in sorted(noto_cmap) if cp in pres and cp in base_cmap}
     drop = [cp for cp in need_mono if cp not in base_cmap]
     for cp in list(mono) + drop:
@@ -554,6 +560,44 @@ def merge_noto_emoji(base, noto, base_names):
     return font
 
 
+def add_mark_feature(font):
+    """补 GPOS `mark` 特性：把组合标记定位回它所属的格子。
+
+    组合标记来自 JuliaMono，是按「550 宽格子居中 + 基线对齐」设计的
+    （例如 acutecomb 自身墨迹 x=[182,367]，中心正好是格子中心 275）。
+    因此在等宽字体里正确的定位就是**把标记原点挪回基准字形原点**（左移一格）。
+
+    没有 GPOS 时 HarfBuzz 会用自己的启发式，把标记推到格子右半边
+    （实测 q+U+0301 的墨迹中心偏 +182），所以这个特性是必需的。
+
+    锚点取 (275, 0)：x=格子中心，y=基线（标记自己已按基线设计好高度，
+    所以 y 不做偏移；这样上下加符、希伯来元音点等都能保持设计位置）。
+    """
+    from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+    cmap = font.getBestCmap()
+    marks, bases = [], []
+    seen_m, seen_b = set(), set()
+    for cp, g in cmap.items():
+        # 名字里有 '-' 等字符的字形不能写进 fea（`A-B` 会被当成字形范围），直接跳过：
+        # 这些多是 Nerd Font 图标字形，不需要当组合符的基准
+        if g.startswith('.') or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_.]*', g):
+            continue
+        if unicodedata.category(chr(cp)) in ('Mn', 'Me'):
+            if g not in seen_m:
+                seen_m.add(g); marks.append(g)
+        elif g not in seen_b:
+            seen_b.add(g); bases.append(g)
+    if not marks or not bases:
+        return 0
+
+    fea = (f'markClass [{" ".join(marks)}] <anchor {CELL // 2} 0> @MC;\n'
+           f'feature mark {{\n'
+           f'  position base [{" ".join(bases)}] <anchor {CELL // 2} 0> mark @MC;\n'
+           f'}} mark;\n')
+    addOpenTypeFeaturesFromString(font, fea)
+    return len(marks)
+
+
 def set_face_meta(font, subfamily, weight, bold, italic):
     psname = f'{FAMILY}-{subfamily.replace(" ", "")}'
     name = font['name']
@@ -618,7 +662,16 @@ def build_face(style, base_key, julia_key, emoji, overwrite):
         apply_emoji_presentation(font, noto, plan)
         print(f'  emoji 层合并完成，glyph 数: {len(font.getGlyphOrder())}')
     else:
+        # 非 emoji 的 face 没有彩色字形，但同样需要「默认文本呈现」符号的单色轮廓；
+        # 否则粗体/斜体里的 © ® ▪ ☀ ❤ … 会回退到别的字体，风格不一致
+        pres = load_emoji_presentation()
+        need_mono = sorted(cp for cp in noto_cmap
+                           if cp not in pres and not is_Default_Ignorable(cp))
+        fill_mono_symbols(base, julia, need_mono)
         font = base
+
+    m = add_mark_feature(font)
+    print(f'  GPOS mark 锚定：{m} 个组合标记')
 
     weight = 700 if style in ('Bold', 'Bold Italic') else 400
     bold = style in ('Bold', 'Bold Italic')

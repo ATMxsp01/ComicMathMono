@@ -15,7 +15,7 @@
 | `julia/JuliaMonoNerdFontMono-BoldItalic.ttf` | Nerd Fonts | JuliaMono Nerd Font **Mono** BoldItalic | 0.062 / NF 3.4.0 | OFL-1.1 |
 | `NotoSansSymbols2-Regular.ttf` | notofonts/symbols | Noto Sans Symbols 2 Regular | 2.008 | OFL-1.1 |
 | `NotoSansSymbols-Regular.ttf` | notofonts/symbols | Noto Sans Symbols Regular | 2.003 | OFL-1.1 |
-| `Noto-COLRv1.ttf` | noto-emoji | Noto Color Emoji（COLRv1 版） | 2.042 | OFL-1.1 |
+| `Noto-COLRv1.ttf` | noto-emoji | Noto Color Emoji（COLRv1 版） | 2.057（Unicode 18.0） | OFL-1.1 |
 
 ## 重新获取
 
@@ -27,7 +27,7 @@
 
 ```bash
 curl -fLo sources/Noto-COLRv1.ttf \
-  https://github.com/googlefonts/noto-emoji/raw/main/fonts/Noto-COLRv1.ttf
+  https://raw.githubusercontent.com/googlefonts/noto-emoji/main/2D/fonts/Noto-COLRv1.ttf
 ```
 
 > 注意：`build.py` 需要的是 **COLRv1** 版（矢量彩色），而不是系统常见的 CBDT 位图版

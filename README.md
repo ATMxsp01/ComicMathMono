@@ -35,11 +35,15 @@ Faces: **Regular, Bold, Italic, Bold Italic** (in [`dist/`](dist/)).
 - **Emoji presentation follows Unicode**: text-default characters (© ® ▪ ☀ ❤ …) carry a
   monochrome outline and switch to colour with VS16; colour-default ones (⌚ ⏰ ⏩ …) carry the
   colour glyph and switch to monochrome with VS15. A real cmap format-14 UVS table is generated
-  (223 variants each way) — see [`docs/emoji-presentation.md`](docs/emoji-presentation.md).
+  (224 variants each way) — see [`docs/emoji-presentation.md`](docs/emoji-presentation.md).
+- A GPOS `mark` lookup is generated for all 355 combining marks. They come from JuliaMono
+  designed **centred in a 550 cell, baseline-aligned**, so the correct placement is simply
+  "put the mark's origin back on the base's origin" — without GPOS, HarfBuzz's own heuristic
+  pushed them into the right half of the cell (measured: +182 too far right).
 
 ### Coverage
 
-Roughly **19,832** codepoints in the Regular face (Regular also carries the colour emoji):
+Roughly **19,855** codepoints in the Regular face (Regular also carries the colour emoji):
 
 | Area | Coverage |
 |---|---|
@@ -56,16 +60,21 @@ Roughly **19,832** codepoints in the Regular face (Regular also carries the colo
 | Braille | 100% |
 | Nerd Font icons (incl. plane-15 Material Design Icons) | 100% |
 | Colour emoji (Noto COLRv1) | 100% of source |
-| Emoji presentation (VS15 / VS16) | implemented — 223 real UVS variants each way |
+| Emoji presentation (VS15 / VS16) | implemented — 224 real UVS variants each way |
 | Hebrew / Arabic | partial (JuliaMono's coverage) |
 | CJK | **not included** (by design) |
 
 ### Install
 
 ```bash
+./install.sh          # 原子替换到 ~/.local/share/fonts/ComicMathMono/
+```
+
+Equivalently, by hand:
+
+```bash
 mkdir -p ~/.local/share/fonts/ComicMathMono
 cp dist/ComicMathMono-*.ttf ~/.local/share/fonts/ComicMathMono/
-fc-cache -f
 ```
 
 kitty example (`~/.config/kitty/kitty.conf`):
@@ -74,6 +83,15 @@ kitty example (`~/.config/kitty/kitty.conf`):
 font_family ComicMathMono
 ```
 
+> **Never run `fc-cache -f` while your terminal is running.** `fc-cache` truncates and rewrites
+> the fontconfig cache files, which are `mmap`ed into running processes; a process holding such
+> a mapping receives `SIGBUS` and dies — and the corrupted mapping keeps killing *later* font
+> lookups too. fontconfig already invalidates its cache by directory mtime, so pre-warming is
+> unnecessary. See [`docs/fc-cache-sigbus.md`](docs/fc-cache-sigbus.md).
+>
+> Also install with `cp` + `mv` (as `install.sh` does) rather than overwriting a font file in
+> place, so a running terminal can never read a half-written file.
+>
 > No `font_features ... -locl` workaround is needed — the shipped fonts contain no bogus `locl`.
 
 ### Build from source
@@ -85,6 +103,23 @@ python3 build.py        # writes into dist/
 
 Source fonts live in [`sources/`](sources/) — see [`sources/README.md`](sources/README.md) for
 provenance and how to (re)download them.
+
+Run `python3 tools/verify.py` afterwards to check the invariants learned from the four bugs
+documented in [`docs/`](docs/) (see the CI workflow in [`.github/workflows/build.yml`](.github/workflows/build.yml)).
+
+### Known limitations
+
+- **No CJK.** CJK ideographs and CJK punctuation are out of scope by design. 26 emoji
+  codepoints are dropped for the same reason — see [`docs/emoji-presentation.md`](docs/emoji-presentation.md).
+- **Arabic** is covered only as far as JuliaMono covers it, in isolated/initial forms;
+  proper Arabic shaping needs a dedicated font.
+- **Hebrew** is covered, including niqqud (vowel points).
+- **No kerning**, and no layout features beyond `ccmp` + `mark`.
+- **Marks do not stack**: GPOS mark-to-base is provided, but not mark-to-mark, so a base with
+  two combining marks shows them overlapping rather than stacked higher.
+- **Colour emoji need COLRv1** support in the renderer (kitty, Chromium, Firefox 116+, …).
+- Source fonts are snapshotted (`sources/README.md`); newer Nerd Font / Noto releases bring
+  new glyphs.
 
 ### License
 
@@ -114,12 +149,15 @@ provenance and how to (re)download them.
   见 [`docs/emoji-presentation.md`](docs/emoji-presentation.md)。
 - 组合重音符号（重音、希伯来元音点、阿拉伯元音符号等）以 **0 宽** 收录，
   分解写法在终端与浏览器里都不会出现「豆腐块」，见 [`docs/combining-marks.md`](docs/combining-marks.md)。
+  并额外生成 GPOS `mark` 定位（355 个组合符）：它们来自 JuliaMono，是按
+  **550 宽格子居中 + 基线对齐**设计的，所以正确定位就是「把标记原点挪回基准字形原点」——
+  没有 GPOS 时 HarfBuzz 的启发式会把它们推到格子右半边（实测偏右 +182）。
 - `Merger` 重命名字形会导致引用它的排版规则失效（受害者是彩色键盘帽 `1️⃣`），
   `revive_renamed_rules()` 把这类引用改回可达字形修复，见 [`docs/merge-renaming.md`](docs/merge-renaming.md)。
 
 ### 覆盖范围
 
-Regular face 约 **19,832** 个码点（彩色 emoji 只在 Regular 里）：
+Regular face 约 **19,855** 个码点（彩色 emoji 只在 Regular 里）：
 
 | 类别 | 覆盖 |
 |---|---|
@@ -136,16 +174,21 @@ Regular face 约 **19,832** 个码点（彩色 emoji 只在 Regular 里）：
 | 盲文 | 100% |
 | Nerd Font 图标（含平面 15 Material Design Icons） | 100% |
 | 彩色 emoji（Noto COLRv1） | 源字体的 100% |
-| emoji 默认呈现与 VS15/VS16 | 已实现（各 223 条真 UVS） |
+| emoji 默认呈现与 VS15/VS16 | 已实现（各 224 条真 UVS） |
 | 希伯来 / 阿拉伯 | 部分（JuliaMono 覆盖多少就多少） |
 | CJK | **不含**（有意为之） |
 
 ### 安装
 
 ```bash
+./install.sh          # 原子替换到 ~/.local/share/fonts/ComicMathMono/
+```
+
+等价的手工写法：
+
+```bash
 mkdir -p ~/.local/share/fonts/ComicMathMono
 cp dist/ComicMathMono-*.ttf ~/.local/share/fonts/ComicMathMono/
-fc-cache -f
 ```
 
 kitty 配置示例（`~/.config/kitty/kitty.conf`）：
@@ -154,6 +197,14 @@ kitty 配置示例（`~/.config/kitty/kitty.conf`）：
 font_family ComicMathMono
 ```
 
+> **终端正在运行时，千万不要跑 `fc-cache -f`。** `fc-cache` 会截断重写 fontconfig 的缓存文件，
+> 而缓存是 `mmap` 进进程的 —— 持有该映射的进程会收到 `SIGBUS` 直接崩溃，**而且被破坏的映射会
+> 继续害到之后每一次字体查找**。fontconfig 本来就按目录 mtime 自动失效缓存，不需要预热。
+> 详见 [`docs/fc-cache-sigbus.md`](docs/fc-cache-sigbus.md)。
+>
+> 另外要用 `cp` + `mv` 原子替换（`install.sh` 就是这么做的），不要原地覆盖字体文件，
+> 否则运行中的终端可能读到写了一半的文件。
+>
 > 成品字体已不含那条有问题的 `locl`，**不需要**再加 `font_features ... -locl` 之类的规避。
 
 ### 从源码构建
@@ -161,9 +212,23 @@ font_family ComicMathMono
 ```bash
 pip install -r requirements.txt
 python3 build.py        # 产物写入 dist/
+python3 tools/verify.py # 回归校验
 ```
 
 源字体在 [`sources/`](sources/)，来源与重新下载方式见 [`sources/README.md`](sources/README.md)。
+`tools/verify.py` 把四个坑对应的不变量都固化成了断言；CI 见 [`.github/workflows/build.yml`](.github/workflows/build.yml)。
+
+### 已知限制
+
+- **不含 CJK**。汉字与中文标点按设计排除在外；26 个 emoji 码点也因为这个原因被丢弃，
+  见 [`docs/emoji-presentation.md`](docs/emoji-presentation.md)。
+- **阿拉伯文**只覆盖 JuliaMono 有的部分，且只能是孤立/词首形态；正确的阿拉伯文排版需要专用字体。
+- **希伯来文**已覆盖，含元音点（niqqud）。
+- **没有 kerning**，排版特性只有 `ccmp` 与 `mark`。
+- **组合符不能叠加**：提供了 GPOS 的 mark-to-base，但没有 mark-to-mark，所以一个基准字形带
+  两个组合符时它们会重叠，而不是往上叠。
+- **彩色 emoji 需要渲染器支持 COLRv1**（kitty、Chromium、Firefox 116+ 等）。
+- 源字体是快照（见 `sources/README.md`）；更新的 Nerd Font / Noto 版本会带来新字形。
 
 ### 许可证
 
