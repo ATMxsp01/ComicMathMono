@@ -363,6 +363,43 @@ def strip_locl(font):
                     rec.LookupListIndex = lkidx[rec.LookupListIndex]
 
 
+def revive_renamed_rules(font, noto):
+    """修复因 Merger 重命名字形而失效的 GSUB/GPOS 规则。
+
+    Merger 合并时，若 base 与 Noto 都有同名但轮廓不同的字形（如 ``one``），会把
+    后一个（Noto）的改名成 ``one.1``；同时把引用它的 ``ccmp`` 连字规则也改成
+    ``one.1``。但最终 ``cmap`` 仍指向 base 的 ``one``，于是这些规则永远无法触发
+    —— 典型受害者是键盘帽 emoji：``1️⃣(0031 FE0F 20E3)`` 本该由
+    ``one + uni20E3 -> 彩色键盘帽`` 合成，结果只剩「数字 + 帽框」两个字形。
+
+    这里把规则里所有指向「被改名副本」的引用，改回 cmap 里同码点、可达的字形。
+    （被改名副本本来就不可达，引用它的规则必然失效，改回同码点字形是唯一合理的修复。）
+    """
+    rev = {}
+    for cp, gname in noto.getBestCmap().items():
+        rev.setdefault(gname, cp)
+    cmap = font.getBestCmap()
+    mapping = {}
+    for name in font.getGlyphOrder():
+        if '.' not in name:
+            continue
+        head, _, tail = name.rpartition('.')
+        if not tail.isdigit():
+            continue
+        cp = rev.get(head)
+        if cp is None:
+            continue
+        target = cmap.get(cp)
+        if target is not None and target != name:
+            mapping[name] = target
+    if not mapping:
+        return 0
+    for tag in ('GSUB', 'GPOS'):
+        if tag in font:
+            _remap_names(font[tag].table, mapping)
+    return len(mapping)
+
+
 def merge_noto_emoji(base, noto):
     """把 Noto COLRv1 整字体合并进 base（base 已有码点优先，Noto 填 emoji）。"""
     base_path = os.path.join(TMP, '_base_tmp.ttf')
@@ -371,6 +408,9 @@ def merge_noto_emoji(base, noto):
     noto.save(noto_path)
     merger = Merger()
     font = merger.merge([base_path, noto_path])
+    n = revive_renamed_rules(font, noto)
+    if n:
+        print(f'  修复被改名失效的排版规则引用: {n} 个字形')
     strip_locl(font)
     return font
 

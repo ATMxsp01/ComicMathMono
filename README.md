@@ -29,6 +29,9 @@ Faces: **Regular, Bold, Italic, Bold Italic** (in [`dist/`](dist/)).
 - Combining marks (accents, Hebrew points, Arabic harakat, …) are included as **zero-width**
   glyphs, so decomposed text renders without tofu in both terminals and browsers —
   see [`docs/combining-marks.md`](docs/combining-marks.md).
+- The `Merger`'s glyph renaming would otherwise kill layout rules that reference the renamed
+  duplicates (colour keycap emoji `1️⃣` were the visible casualty); `revive_renamed_rules()`
+  repairs those references — see [`docs/merge-renaming.md`](docs/merge-renaming.md).
 
 ### Coverage
 
@@ -103,6 +106,8 @@ provenance and how to (re)download them.
   完整来龙去脉见 [`docs/locl-issue.md`](docs/locl-issue.md)。
 - 组合重音符号（重音、希伯来元音点、阿拉伯元音符号等）以 **0 宽** 收录，
   分解写法在终端与浏览器里都不会出现「豆腐块」，见 [`docs/combining-marks.md`](docs/combining-marks.md)。
+- `Merger` 重命名字形会导致引用它的排版规则失效（受害者是彩色键盘帽 `1️⃣`），
+  `revive_renamed_rules()` 把这类引用改回可达字形修复，见 [`docs/merge-renaming.md`](docs/merge-renaming.md)。
 
 ### 覆盖范围
 
