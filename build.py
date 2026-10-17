@@ -534,13 +534,68 @@ def fit_glyphs_in_cells(font, ranges=None, categories=None, margin=10):
 def fit_terminal_text(font, style):
     """让终端文本字形落在 cell 内；斜体额外处理数字、标点和数学符号。"""
     letters = ('Lu', 'Ll', 'Lt', 'Lm', 'Lo')
-    n = fit_glyphs_in_cells(font, categories=letters, margin=25)
+    n = fit_glyphs_in_cells(font, categories=letters, margin=10)
     if style in ('Italic', 'Bold Italic'):
         italic_text = ('Nd', 'Nl', 'No', 'Pc', 'Pe', 'Pf', 'Pi', 'Po', 'Ps',
                        'Sc', 'Sk', 'Sm')
-        n += fit_glyphs_in_cells(font, categories=italic_text, margin=25)
+        n += fit_glyphs_in_cells(font, categories=italic_text, margin=10)
     return n
 
+
+
+def unify_italic_a(font, upright_key):
+    """把斜体/粗斜体的小写 a（及常见预组合形式）换成对应直立 face 的单层 a。
+
+    SeriousShanns 的斜体 a 与 ComicShanns 的 regular/bold a 是两种不同设计；
+    斜体里未加符的 a 和从 Julia 补进来的带符 a 甚至也不是同一套。这里取
+    ComicR/ComicB 的 a，按斜体 face 自身 o 的宽高比缩放、再按 post.italicAngle
+    倾斜，最后居中到原斜体 a 的宽度，保持与周围 letter 的比例。
+    """
+    from fontTools.ttLib.tables._g_l_y_f import GlyphCoordinates
+    up = TTFont(SRC[upright_key])
+    upcmap = up.getBestCmap()
+    upglyf = up['glyf']
+    cmap = font.getBestCmap()
+    glyf = font['glyf']
+    hmtx = font['hmtx']
+
+    old_a = glyf[cmap[ord('a')]]
+    target_w = old_a.xMax - old_a.xMin
+    o_src = upglyf[upcmap[ord('o')]]
+    o_dst = glyf[cmap[ord('o')]]
+    sx = (o_dst.xMax - o_dst.xMin) / (o_src.xMax - o_src.xMin)
+    sy = (o_dst.yMax - o_dst.yMin) / (o_src.yMax - o_src.yMin)
+    shear = math.tan(math.radians(-ITALIC_ANGLE))
+
+    a_src = upglyf[upcmap[ord('a')]]
+    xs = [x * sx + y * shear for x, y in a_src.coordinates]
+    extra_x = target_w / (max(xs) - min(xs))
+
+    changed = 0
+    for cp, dst_name in cmap.items():
+        nfd = unicodedata.normalize('NFD', chr(cp))
+        if not nfd.startswith('a') or (cp != 0x61 and len(nfd) == 1):
+            continue
+        src_name = upcmap.get(cp)
+        if not src_name:
+            continue
+        g = upglyf[src_name]
+        if getattr(g, 'numberOfContours', 0) <= 0 or not hasattr(g, 'coordinates'):
+            continue
+        ng = copy.deepcopy(g)
+        ng.coordinates = GlyphCoordinates([
+            ((x * sx + y * shear) * extra_x, y * sy)
+            for x, y in g.coordinates])
+        ng.recalcBounds(glyf)
+        adv = hmtx.metrics[dst_name][0]
+        cx = (ng.xMin + ng.xMax) / 2.0
+        ng.coordinates = GlyphCoordinates([
+            (adv / 2.0 + (x - cx), y) for x, y in ng.coordinates])
+        ng.recalcBounds(glyf)
+        glyf[dst_name] = ng
+        hmtx.metrics[dst_name] = (adv, round(ng.xMin))
+        changed += 1
+    return changed
 
 
 def drop_cmap_entry(font, cp):
@@ -1761,6 +1816,11 @@ def build_face(style, base_key, julia_key, emoji, overwrite):
     n_coptic = add_coptic_capitals(font)
     if n_coptic:
         print(f'  Coptic 大写：从对应小写合成 {n_coptic} 个（缩放到 cap，advance {CELL}）')
+
+    if style in ('Italic', 'Bold Italic'):
+        n_a = unify_italic_a(font, 'comic_r' if style == 'Italic' else 'comic_b')
+        if n_a:
+            print(f'  斜体 a 统一：{n_a} 个 a 形态改用 Comic 的直立 a 倾斜版')
 
     n_fit = fit_terminal_text(font, style)
     if n_fit:

@@ -73,6 +73,9 @@
     70 单位，kitty 会按 cell 裁掉。`fit_terminal_text()` 只处理真正越界的字形：
     左右越界平移、只有超宽才压缩（留 10 单位侧边距），未越界字形完全不动；
     `verify.py` 3e 断言所有 Letter/斜体文本字形都不越界。
+  - **斜体 a 统一**：`unify_italic_a()` 取 ComicR/ComicB 的单层 a，按斜体 face 的 o
+    宽高比缩放、按 `post.italicAngle` 倾斜，并保持原斜体 a 宽度；同时替换 Comic 里
+    存在的 10 个常见带符 a 形式，避免未加符 a 与 `à/á/â…` 两套风格。
 
 - [L] **D2 · Arabic 连写形态（低优先级 · 暂缓）**
   目前只有**孤立形态**（未并入 JuliaMono 的 `init`/`medi`/`fina` GSUB）。要做需要把 Julia 的

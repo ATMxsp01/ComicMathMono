@@ -228,6 +228,9 @@ does not match a fresh build.
 - **Precomposed + extra mark**: HarfBuzz normally composes `a + acute` to `aacute`; a contextual
   `ccmp` rule decomposes it back to `a + acute` **only when another combining mark follows**, so
   the second mark can use mark-to-mark instead of falling back to the baseline.
+- **Italic `a` unified**: Italic/BoldItalic `a` and its common accented forms now use the upright
+  ComicShanns single-storey `a`, scaled to the italic face's x-height/width and sheared by
+  `post.italicAngle`; `a` therefore matches Regular/Bold instead of the old double-storey form.
 - **Terminal cell fitting is minimal**: only glyphs that actually overflow their 550-unit cell
   are touched — left/right overflow is shifted back, and only glyphs wider than the cell are
   compressed (10-unit bearings). Unoverflowing glyphs are left unchanged. This covers all letters
@@ -455,6 +458,9 @@ byte-identical 的字体，CI 也会在「提交的 dist/ 和重新构建的结�
 - **预组合字母 + 额外标记**：HarfBuzz 会先把 `a + acute` 合成 `aacute`；GSUB 里加了一条
   contextual `ccmp` 规则，**只有后面还跟着组合符时**才拆回 `a + acute`，让第二个标记走
   mark-to-mark，而不是落回基线。
+- **斜体 a 统一**：Italic/BoldItalic 的 `a` 及常见带符形式改用 ComicShanns 的**单层 a**，
+  按斜体 face 的 x-height/宽度缩放，再按 `post.italicAngle` 倾斜；因此斜体 a 与
+  Regular/Bold 风格一致，不再是原来的双层 a。
 - **终端 cell 收格是最小改动**：只处理真正越出 550 格的字形 —— 左右越界就平移回格内，
   只有宽度超过格子的才水平压缩（留 10 单位侧边距）；未越界的字形完全不动。
   范围覆盖所有字母，以及斜体的数字/标点/货币/数学符号，希腊多调号大写也在内。
