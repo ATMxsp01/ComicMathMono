@@ -525,7 +525,7 @@ def check_face(name, pres):
         adv = hmtx.metrics[g][0]
         if adv <= 0:
             continue
-        if gl.xMin < 20 or gl.xMax > adv - 20:
+        if gl.xMin < 0 or gl.xMax > adv:
             overhang.append((cp, g, adv, gl.xMin, gl.xMax))
     if overhang:
         fail(f'{name}: {len(overhang)} 个字形墨迹超出格子（kitty 会裁切）：'

@@ -70,8 +70,8 @@
   - `verify.py` 断言：GPOS 必须有 LookupType 6；above/below 的 y_offset 必须等于两端墨迹差（±2）；
     `a/á/α + U+0301 + U+0304` 都必须叠到正确高度。
   - **终端 cell 裁切**：SeriousShanns 斜体的 `C/E/I`、`d`、`/`、`%` 等墨迹越界最多约
-    70 单位，kitty 会按 cell 裁掉。`fit_terminal_text()` 把四个 face 的所有字母（以及
-    斜体数字/标点/货币/数学符号）水平收进 550 格，留 25 单位侧边距；
+    70 单位，kitty 会按 cell 裁掉。`fit_terminal_text()` 只处理真正越界的字形：
+    左右越界平移、只有超宽才压缩（留 10 单位侧边距），未越界字形完全不动；
     `verify.py` 3e 断言所有 Letter/斜体文本字形都不越界。
 
 - [L] **D2 · Arabic 连写形态（低优先级 · 暂缓）**

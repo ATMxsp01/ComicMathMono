@@ -478,8 +478,8 @@ def normalize_symbol_font(font):
     return font
 
 
-def fit_glyphs_in_cells(font, ranges=None, categories=None, margin=25):
-    """把指定字形收进自己的 advance 格子，避免终端按 cell 裁切。
+def fit_glyphs_in_cells(font, ranges=None, categories=None, margin=10):
+    """只把**真正越出 cell** 的指定字形收回来，未越界的完全不动。
 
     典型来源：
       · JuliaMono 的希腊多调号大写（U+1F5B 墨迹 877 单位宽）；
@@ -487,9 +487,10 @@ def fit_glyphs_in_cells(font, ranges=None, categories=None, margin=25):
         超出 cell 的部分直接裁掉（官方 FAQ 明确要求等宽字体所有 face 都必须
         落在同一固定宽度内）。
 
-    ``ranges=None`` 表示不限制码点；``categories=None`` 表示不限制 Unicode
-    大类。宽度超过 ``advance - 2*margin`` 时水平压缩，最后把墨迹 bbox 居中
-    到格内，并留出左右 margin。
+    处理原则是最小改动：
+      · ``xMin >= 0`` 且 ``xMax <= advance`` 的字形——**跳过**，连位置都不动；
+      · 只是偏到左边/右边、但宽度不超过格子的——平移到格内，不缩放；
+      · 宽度真的超过格子的——才水平压缩到 ``advance - 2*margin`` 并居中。
     """
     from fontTools.ttLib.tables._g_l_y_f import GlyphCoordinates
     glyf = font['glyf']
@@ -514,13 +515,11 @@ def fit_glyphs_in_cells(font, ranges=None, categories=None, margin=25):
         if not xs:
             continue
         xmin, xmax = min(xs), max(xs)
-        w = xmax - xmin
-        # 留出侧边距：即使 bbox 收进 0..550，贴着格子边也会让相邻字形
-        # 的重音/斜体笔画在渲染时相碰；kitty 也按 cell 边界裁切。
-        max_w = max(1, adv - 2 * margin)
-        if w <= max_w and xmin >= margin - 2 and xmax <= adv - margin + 2:
+        if xmin >= 0 and xmax <= adv:
             seen.add(g)
             continue
+        w = xmax - xmin
+        max_w = max(1, adv - 2 * margin)
         s = min(1.0, max_w / w) if w > max_w else 1.0
         cx = (xmin + xmax) / 2.0
         gl.coordinates = GlyphCoordinates(
