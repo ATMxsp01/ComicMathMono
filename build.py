@@ -14,19 +14,28 @@ advance 规范：单格 550/1000upem；emoji 1100（两格）。CJK 不烤，走
 产物输出到 dist/。
 """
 import copy
+import math
 import os
 import re
 import sys
 import unicodedata
+from collections import Counter
 
 from fontTools.ttLib import TTFont, newTable
+from fontTools.misc import timeTools
+from fontTools.misc.transform import Transform
+from fontTools.otlLib.builder import buildStatTable
+from fontTools.pens.boundsPen import BoundsPen
+from fontTools.pens.cu2quPen import Cu2QuPen
 from fontTools.pens.recordingPen import DecomposingRecordingPen
+from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.merge import Merger
 from fontTools.merge.unicode import is_Default_Ignorable
 import fontTools.ttLib as ttLib
 from fontTools.ttLib.tables.C_O_L_R_ import table_C_O_L_R_
 from fontTools.ttLib.tables.C_P_A_L_ import table_C_P_A_L_
+from fontTools.ttLib.tables.ttProgram import Program
 
 # ---------- 路径 ----------
 
@@ -38,6 +47,29 @@ TMP = os.path.join(ROOT, '.build')          # 中间产物，不入库
 FAMILY = 'ComicMathMono'
 CELL = 550        # 单格宽度
 WIDE = 1100       # emoji 宽度（两格）
+
+# 键盘帽基字符：U+0023 '#'、U+002A '*'、U+0030..U+0039 '0'..'9'。
+# 它们的 VS16 必须写成 DefaultUVS（沿用默认字形），不能换成 Noto 的彩色数字 ——
+# 原因见 apply_emoji_presentation() 里的注释。
+KEYCAP_BASES = frozenset([0x23, 0x2A] + list(range(0x30, 0x3A)))
+
+# ---------- 版本与纵向指标 ----------
+# 四个 face 必须共用同一套纵向指标（fontbakery family/vertical_metrics），否则切换字重/斜体时行距会跳。
+VERSION = '1.0'                 # head.fontRevision 与 name ID5/ID3 共用
+# 行高 = ASCENT - DESCENT = 1278（保持不变）。之所以从 928/−350 挪成 1030/−248：
+# Agrave 的重音顶到 988（斜体 1026，倾斜让 bbox 更高）—— 声明 ascent 装不下最高字形时，
+# macOS 可能改用更大的行高（fontbakery `typoascender_exceeds_Agrave`）。挪动只是把单位从
+# descent 移到 ascent：行高不变，文字在行框内下移 102/1278 ≈ 8%（14px 字号约 1.1px）。
+ASCENT = 1030                   # hhea.ascent = OS/2.sTypoAscender（控制行距）
+DESCENT = -248                  # hhea.descent = OS/2.sTypoDescender（控制行距）
+# usWinAscent/Descent 要覆盖**全家族**字形 bbox，否则 Windows/GDI 会裁掉高字形
+# （斜体面实测 yMax=1317 / yMin=-1029）。行距交给上面的 typo 值 + fsSelection bit7。
+# 若换源字体后字形更高，tools/verify.py 的 win_ascent 断言会失败，届时更新这两个常量。
+WIN_ASCENT = 1317
+WIN_DESCENT = 1029
+ITALIC_ANGLE = -12.7            # 取自 SeriousShanns 的 post.italicAngle（原值 -12.5 是拍脑袋的）
+UNDERLINE_POSITION = -100       # 取自 JuliaMono（-200/100 @2000upem）
+UNDERLINE_THICKNESS = 50
 
 # Julia 优先用 sources/julia/ 下的本地副本；没有则回退系统已安装的 Nerd Font 版本
 SYSTEM_JULIA_DIRS = [
@@ -75,15 +107,53 @@ SRC = {
     'cjk5': os.path.join(SOURCES, 'NotoSansCJKsc-Symbols5.ttf'),
 }
 
-# 成品字体里写入的许可信息（便于再分发时满足上游要求）
+# 成品字体里写入的许可信息（便于再分发时满足上游要求）。
+# OFL-1.1 要求「版权声明随字体分发」，所以这里把各上游的 copyright 一并列出，
+# 而不是只写「derived from …」。完整许可文本见 NOTICE.md / LICENSE-OFL-1.1.txt。
 COPYRIGHT = (
-    'ComicMathMono: a merged terminal monospace font. Glyphs derived from '
-    'ComicShannsMono Nerd Font (MIT), SeriousShanns Nerd Font (MIT), '
-    'JuliaMono (OFL-1.1) and Noto Color Emoji (OFL-1.1). '
+    'ComicMathMono, a merged terminal monospace font. '
+    'Derived from: ComicShannsMono Nerd Font (Copyright (c) 2018 Shannon Miwa, '
+    '(c) 2023 Jesus Gonzalez, (c) 2023 Rodrigo Batista de Moraes, (c) 2024 Fini Jastrow; MIT); '
+    'SeriousShanns Nerd Font (Copyright (c) 2018 Shannon Miwa, (c) 2019 dtinth, '
+    '(c) 2023-2024 Kyle Beechly; MIT); '
+    'JuliaMono (Copyright (c) 2020-2026 The JuliaMono Project Authors; OFL-1.1); '
+    'Noto Color Emoji, Noto Sans Symbols/Symbols 2, Noto Sans CJK '
+    '(Copyright Google Inc. / The Noto Project Authors / Adobe; OFL-1.1). '
     'Distributed under the SIL Open Font License, Version 1.1.'
 )
 LICENSE_DESC = 'This Font Software is licensed under the SIL Open Font License, Version 1.1.'
 LICENSE_URL = 'https://scripts.sil.org/OFL'
+
+# ---------- name 表里其余字段（ID 8/9/10/11/12/19/21/22） ----------
+# ID 7（Trademark）**有意留空**：没有注册过商标就不做商标声明。
+# ID 18（Compatible Full）只有 Mac 平台会读，而我们已经删掉全部 Mac 记录，故不加。
+# ID 23/24（CPAL light/dark）与 ID 25（可变字体前缀）对本字体不适用。
+VENDOR_NAME = 'ATMxsp01'                       # ID 8 Manufacturer
+DESIGNER_NAME = 'ATMxsp01'                     # ID 9 Designer
+DESCRIPTION = ('A comic-style monospace terminal font with Latin, Greek, Cyrillic, '
+               'mathematical symbols and full-colour emoji.')   # ID 10
+VENDOR_URL = 'https://github.com/ATMxsp01/ComicMathMono'        # ID 11
+DESIGNER_URL = 'https://github.com/ATMxsp01'                    # ID 12
+SAMPLE_TEXT = ('The quick brown fox jumps over the lazy dog. '
+               '0123456789 \u2211 \u222b \u221a \u03c0 \u2260 \u2264 \u2265 \U0001f600')  # ID 19
+
+# ---------- 可复现构建 ----------
+# head.created/modified 每次构建都变 → 文件不 byte-identical。用 SOURCE_DATE_EPOCH
+# 固定（默认 2000-01-01 UTC）；head 里的时间戳是「1904 起算的秒」，所以要减 epoch_diff。
+SOURCE_DATE_EPOCH = int(os.environ.get('SOURCE_DATE_EPOCH', '946684800'))
+BUILD_TIME = SOURCE_DATE_EPOCH - timeTools.epoch_diff
+
+
+def ensure_reproducible_hash_seed():
+    """强制 PYTHONHASHSEED=0，否则 GPOS 的二进制每次构建都不同。
+
+    fontTools 编译 OT 表时按「子表共享顺序」排布，而那个顺序受 Python 字符串哈希
+    随机化影响（实测两次构建 GPOS 字节不同、CMAP/GLYF 相同）。解释器启动后再改
+    ``os.environ`` 已经无效，只能带 seed 自重启一次；只在走 ``main()`` 时做。
+    """
+    if os.environ.get('PYTHONHASHSEED') != '0':
+        os.environ['PYTHONHASHSEED'] = '0'
+        os.execv(sys.executable, [sys.executable, os.path.abspath(__file__), *sys.argv[1:]])
 
 # ---------- Julia 层码点范围 ----------
 # Julia 优先（可覆盖 base 已有字形）：数学/符号区，保证技术符号风格统一
@@ -128,6 +198,20 @@ JULIA_COMBINING_RANGES = [
     (0x20D0, 0x20FF),   # Combining Diacritical Marks for Symbols
     (0xFE20, 0xFE2F),   # Combining Half Marks
 ]
+
+
+def is_combining_mark(cp):
+    """判定某个码点是否要当组合标记处理（0 宽 + 进 GPOS mark 定位）。
+
+    **不能只用 ``unicodedata.category``**：本机 Python 3.13 的 Unicode 数据是 15.1，
+    而 JuliaMono 快照已经到 Unicode 16 —— U+1ACF..U+1ADD、U+1AE0..U+1AE5 这 21 个
+    新组合符会被 Python 判成 Cn（未分配），于是既没 0 宽化、也没进 GPOS mark
+    （fontbakery 的 ``gdef_mark_chars`` 会报）。既然这些区块就是我们拷贝组合符的范围，
+    直接按区块判定：区块内 + 类别为 Mn/Me，二者取并集。
+    """
+    if unicodedata.category(chr(cp)) in ('Mn', 'Me'):
+        return True
+    return any(a <= cp <= b for a, b in JULIA_COMBINING_RANGES)
 
 
 # ---------- COLR/CPAL 合并支持 ----------
@@ -196,12 +280,20 @@ ttLib.getTableClass = _getTableClass
 
 # ---------- 基础工具 ----------
 
-def decompose_glyph(font, name):
+def decompose_glyph(font, name, cubic=False):
+    """把字形分解成一个 glyf 简单字形。
+
+    ``cubic=True`` 用于 CFF/OTTO 源（三次曲线）：必须先经 ``Cu2QuPen`` 转成二次
+    曲线。否则 ``TTGlyphPen`` 会把三次段用 fontTools 内部的 ``flagCubic=0x80``
+    标记写进 glyf 的 flag 字节 —— 那是 OpenType 的保留位，OTS / 浏览器会判定
+    "Bad glyph flag" 并**拒收整份字体**（本项目的 5 个 CJK 类 emoji 就踩了这个坑）。
+    """
     glyph_set = font.getGlyphSet()
     rec = DecomposingRecordingPen(glyph_set)
     glyph_set[name].draw(rec)
     pen = TTGlyphPen(None)
-    rec.replay(pen)
+    out_pen = Cu2QuPen(pen, max_err=1.0, reverse_direction=True) if cubic else pen
+    rec.replay(out_pen)
     return pen.glyph()
 
 
@@ -214,11 +306,14 @@ def scale_glyph(g, factor):
 def flatten_scale_font(font, factor, upem_factor=None, uniform_advance=None):
     if upem_factor is None:
         upem_factor = factor
+    # CFF/OTTO 源没有 glyf：先把三次曲线转成二次曲线（见 decompose_glyph），
+    # 并在建好 glyf 之后丢弃 CFF，避免留下一个"半转换"的字体对象。
+    cubic = 'CFF ' in font or 'CFF2' in font
     order = font.getGlyphOrder()
     new_glyphs = {}
     for name in order:
         try:
-            g = decompose_glyph(font, name)
+            g = decompose_glyph(font, name, cubic=cubic)
         except Exception:
             continue
         if factor != 1.0:
@@ -228,6 +323,9 @@ def flatten_scale_font(font, factor, upem_factor=None, uniform_advance=None):
     glyf.glyphOrder = order
     glyf.glyphs = new_glyphs
     font['glyf'] = glyf
+    for tag in ('CFF ', 'CFF2', 'VORG'):
+        if tag in font:
+            del font[tag]
     for name, m in list(font['hmtx'].metrics.items()):
         m = list(m)
         m[0] = round(m[0] * factor)
@@ -392,7 +490,11 @@ def prepare_emoji_presentation(base, julia, noto_cmap):
 
 
 def _set_uvs(font, fe0f, fe0e):
-    """写入 cmap format 14（Unicode 变体序列）表。"""
+    """写入 cmap format 14（Unicode 变体序列）表。
+
+    列表元素是 ``(码点, 字形名)``；字形名为 ``None`` 表示 **DefaultUVS** ——
+    即「这条变体序列沿用 cmap 的默认字形，不换」。
+    """
     uvs = {}
     if fe0f:
         uvs[0xFE0F] = fe0f
@@ -438,9 +540,91 @@ def apply_emoji_presentation(font, noto, plan):
         if colr and mono != colr:
             pairs[cp] = (mono, colr)
 
-    _set_uvs(font, sorted((cp, c) for cp, (m, c) in pairs.items()),
-             sorted((cp, m) for cp, (m, c) in pairs.items()))
-    print(f'  UVS：VS16(强制彩色) {len(pairs)} 条，VS15(强制文本) {len(pairs)} 条')
+    # 键盘帽基字符（0-9 # *）的变体序列走 DefaultUVS：沿用 cmap 里的默认（单色）字形。
+    # 不能像其它「文本默认」emoji 那样把 VS16 换成 Noto 的彩色数字，因为 ccmp 键盘帽
+    # 连字的输入是单色字形（sub one uni20E3 -> keycap）；一旦 cmap14 把 U+0031+FE0F
+    # 指向彩色的 one.1，`0031 FE0F 20E3` 就永远匹配不上连字，会散成「彩色数字 + 帽框」。
+    # 这也正是成熟字体的做法：Noto Color Emoji 的 371 条 FE0F 全是 DefaultUVS ——
+    # 原则是「cmap14 选中的字形，必须和后续连字要匹配的字形一致」。
+    default_uvs = {cp for cp in pairs if cp in KEYCAP_BASES}
+    for cp in default_uvs:
+        del pairs[cp]
+
+    fe0f = {cp: None for cp in default_uvs}
+    fe0f.update({cp: colr for cp, (mono, colr) in pairs.items()})
+    fe0e = {cp: None for cp in default_uvs}
+    fe0e.update({cp: mono for cp, (mono, colr) in pairs.items()})
+
+    # 默认**彩色**呈现的 emoji（cmap 已经指向 COLR 基字形）：FE0F 也走 DefaultUVS。
+    # 它们是合法的 `cp + FE0F` 序列，但字形不变；不登记的话 FE0F 会以"不可见字形"
+    # 残留下来 —— 实测 `🏴 + FE0F + ZWJ + ☠ + FE0F` 会散成 2 个字形。
+    # Noto Color Emoji 的 371 条 FE0F 全是 DefaultUVS，就是同一个道理。
+    colour_default = sorted(cp for cp, g in cmap.items()
+                            if g in colr_base and cp not in pairs)
+    fe0f.update({cp: None for cp in colour_default})
+
+    _set_uvs(font, sorted(fe0f.items(), key=lambda kv: kv[0]),
+             sorted(fe0e.items(), key=lambda kv: kv[0]))
+    print(f'  UVS：VS16 {len(fe0f)} 条'
+          f'（DefaultUVS {len(default_uvs) + len(colour_default)}：键盘帽 {len(default_uvs)}'
+          f' + 默认彩色 {len(colour_default)}），VS15 {len(fe0e)} 条')
+
+
+def add_colour_ligature_variants(font):
+    """让 emoji ZWJ 连字同时接受「彩色变体」字形。返回新增的连字条数。
+
+    文本默认的 emoji（Emoji_Presentation=No，如 ❤ 🏳 👁 ⚖ ☠ ♀ ♂ ⚕）在 cmap 里是**单色**
+    字形，只有 VS16 之后才换成彩色字形；而 Noto 的 ZWJ 连字是按单色字形名写的。
+    于是标准写法 `cp + FE0F + ZWJ + …` 匹配不上，实测 ❤️‍🔥 🏳️‍🌈 🏴‍☠️ 👁️‍🗨️ 🧑‍⚕️ 全部散成 3~4 个字形。
+
+    这里为每条连字补一个「把单色组件替换成对应彩色组件」的变体（组件里有多处时取所有组合）。
+    单色写法（`cp + ZWJ + …`，文本呈现）仍然由原连字匹配，两种都能用。
+    """
+    from fontTools.ttLib.tables.otTables import Ligature
+    if 'GSUB' not in font:
+        return 0
+    cmap = font.getBestCmap()
+    to_colour = {}
+    for t in font['cmap'].tables:
+        if t.format == 14:
+            for cp, g in (getattr(t, 'uvsDict', {}) or {}).get(0xFE0F, []):
+                if g and cp in cmap and g != cmap[cp]:
+                    to_colour[cmap[cp]] = g       # 单色 → 彩色
+    if not to_colour:
+        return 0
+    added = 0
+    for lk in font['GSUB'].table.LookupList.Lookup:
+        if lk.LookupType != 4:                    # 只处理 Ligature 查找
+            continue
+        for sub in lk.SubTable:
+            for first, ligs in list(sub.ligatures.items()):
+                for lig in list(ligs):
+                    comps = list(lig.Component)
+                    slots = [i for i, g in enumerate([first] + comps) if g in to_colour]
+                    for mask in range(1, 1 << len(slots)):
+                        new_first, new_comps = first, list(comps)
+                        for bit, idx in enumerate(slots):
+                            if not (mask >> bit) & 1:
+                                continue
+                            if idx == 0:
+                                new_first = to_colour[first]
+                            else:
+                                new_comps[idx - 1] = to_colour[comps[idx - 1]]
+                        same = sub.ligatures.get(new_first, [])
+                        if any(list(l.Component) == new_comps for l in same):
+                            continue
+                        dup = Ligature()
+                        dup.Component = new_comps
+                        dup.LigGlyph = lig.LigGlyph
+                        dup.CompCount = len(new_comps) + 1
+                        sub.ligatures.setdefault(new_first, []).append(dup)
+                        added += 1
+            # 变体是**追加**到 LigatureSet 末尾的，而 HarfBuzz 按集合顺序取第一个匹配 ——
+            # 不排序的话短连字（如「跑步+肤色」）会抢在长连字变体前面，序列又散开。
+            # OpenType 规范本来就要求 ligature 按组件数从长到短排列。
+            for ligs in sub.ligatures.values():
+                ligs.sort(key=lambda l: -len(l.Component))
+    return added
 
 
 def zero_width_marks(font):
@@ -448,7 +632,7 @@ def zero_width_marks(font):
     cmap = font.getBestCmap()
     n = 0
     for cp, gname in cmap.items():
-        if unicodedata.category(chr(cp)) not in ('Mn', 'Me'):
+        if not is_combining_mark(cp):
             continue
         if gname not in font['hmtx'].metrics:
             continue
@@ -458,6 +642,285 @@ def zero_width_marks(font):
             font['hmtx'].metrics[gname] = tuple(m)
             n += 1
     return n
+
+
+def zero_invisible_widths(font):
+    """把「组合标记（Mn/Me）」和「Default_Ignorable」字符的 advance 都设为 0。
+
+    两类都不该占格子：
+      · 组合标记要叠在前一个字符上 —— Julia 层拷进来的已经在 ``zero_width_marks()``
+        里 0 宽化，但 emoji 呈现阶段后补的 U+20E3 会漏掉；
+      · Default_Ignorable（ZWJ / ZWNJ / ZWSP / 双向控制符 / Tag 字符…）按 Unicode
+        规定不应产生可见宽度。HarfBuzz 会自己隐藏它们，但其它渲染器与测量 API 会按
+        hmtx 算宽 —— Noto Color Emoji 的 1100 会漏进来（ZWJ、Tag 字符会变成 **2 格**）。
+        参考 Noto Sans Mono：一律 0。
+    """
+    cmap = font.getBestCmap()
+    n_mark = n_ign = 0
+    for cp, gname in cmap.items():
+        if gname not in font['hmtx'].metrics:
+            continue
+        is_mark = is_combining_mark(cp)
+        if not (is_mark or is_Default_Ignorable(cp)):
+            continue
+        m = list(font['hmtx'].metrics[gname])
+        if m[0] != 0:
+            m[0] = 0
+            font['hmtx'].metrics[gname] = tuple(m)
+            if is_mark:
+                n_mark += 1
+            else:
+                n_ign += 1
+    return n_mark, n_ign
+
+
+def drop_control_cmap(font):
+    """删掉 C0/C1 控制字符（Cc）的 cmap 映射。
+
+    斜体基底 SeriousShanns 把 U+0016–U+001F、U+0080–U+0088 映射到了空白字形，
+    部分渲染器会把控制码画成一个空盒子（fontbakery 的 `control_chars` 也会报）。
+    控制字符本就不该有字形。
+    """
+    n = 0
+    for cp in list(font.getBestCmap()):
+        if unicodedata.category(chr(cp)) == 'Cc':
+            drop_cmap_entry(font, cp)
+            n += 1
+    return n
+
+
+def compact_hmtx(font):
+    """按 advance 重排字形，把最常见 advance 的字形集中到字序**尾部**。
+
+    这样 hmtx 的「尾部等宽段」最长、``hhea.numberOfHMetrics`` 最小。为什么需要：
+    0 宽化 `Default_Ignorable`（ZWJ / Tag 字符）之后，这些 0 宽字形插在尾部 Noto 的
+    1100 段中间，把等宽段打断 —— numberOfHMetrics 从 21321 涨到 63591，hmtx 从
+    166 KB 涨到 254 KB，而两种编码的字形 advance 完全等价（纯浪费）。
+
+    **两个前提**：
+      · 必须在**保存前**、字形还带真实名字时做。成品是 post format 3，重新载入后 glyph
+        name 是按 GID 合成的（``glyphNNNNN``），那时再重排会让 GSUB/COLR 的 name→GID
+        解析全部错位。
+      · 必须在 ``add_mark_feature()`` **之前**做：GPOS 的 Coverage 与 MarkArray/BaseArray
+        是按 GID 对齐的平行数组，而 feaLib 的 buildCoverage 按「当前 GID」排序，所以
+        GPOS 要用重排后的字序来建。GSUB（来自 Merger）不受影响：它的 Coverage 在
+        preWrite 时从 ``ligatures`` 字典按 GID 重新生成。
+
+    返回尾部等宽段的长度（0 表示没做重排）。
+    """
+    order = font.getGlyphOrder()
+    if not order or order[0] != '.notdef':
+        return 0
+    metrics = font['hmtx'].metrics
+    tail_adv = Counter(metrics[g][0] for g in order).most_common(1)[0][0]
+    head = [g for g in order[1:] if metrics[g][0] != tail_adv]
+    tail = [g for g in order[1:] if metrics[g][0] == tail_adv]
+    font.setGlyphOrder(['.notdef'] + head + tail)   # 会同步更新 glyf.glyphOrder
+    return len(tail)
+
+
+def gsub_outputs(gsub):
+    """GSUB 里**产出**的字形（只算输出，不算输入）。
+
+    输入字形如果没有 cmap 映射、也没有任何 lookup 产出它，就等于不可达 —— fontbakery 的
+    ``unreachable_glyphs`` 也是这个口径。注意 mapping 的 **key 是输入**，不能算。
+    """
+    out = set()
+
+    def add(lookup_type, sub):
+        try:
+            if lookup_type == 1:                    # Single
+                out.update(sub.mapping.values())
+            elif lookup_type == 2:                  # Multiple
+                for slot in sub.mapping.values():
+                    out.update(slot)
+            elif lookup_type == 3:                  # Alternate
+                for alts in sub.alternates.values():
+                    out.update(alts)
+            elif lookup_type == 4:                  # Ligature
+                for ligs in sub.ligatures.values():
+                    for lig in ligs:
+                        out.add(lig.LigGlyph)
+            elif lookup_type == 7:                  # Extension
+                add(sub.ExtensionLookupType, sub.ExtSubTable)
+            elif lookup_type == 8:                  # Reverse chaining single
+                out.update(sub.Substitute)
+            # 5/6 上下文查找本身不产出字形，只调度别的 lookup（那些 lookup 也在列表里）
+        except AttributeError:
+            pass
+
+    if getattr(gsub, 'LookupList', None):
+        for lk in gsub.LookupList.Lookup:
+            for sub in lk.SubTable:
+                add(lk.LookupType, sub)
+    return out
+
+
+def _drop_unreachable_once(font):
+    """删掉从任何 cmap 子表 / UVS / GSUB / GPOS / GDEF / COLR 都到不了的字形（保留 .notdef）。
+
+    这些字形在源字体里就没有访问路径：ComicShanns 有 4 个未编码字形（Ucaseircumflex /
+    lowercasearon / ccommaaccent / idotaccent），另外还有合并时被改名的各源 ``.null``、
+    Noto Color Emoji 的 ``.notdef`` 副本 —— 改名后就没人引用了。共 ~1.3 KB 死代码。
+
+    **必须建 GPOS 之前调用**：删字形会改变 GID。
+    """
+    order = font.getGlyphOrder()
+    known = set(order)
+    reach = set()
+    for t in font['cmap'].tables:
+        cm = getattr(t, 'cmap', None)
+        if cm:
+            reach.update(cm.values())
+        if getattr(t, 'format', None) == 14:
+            for entries in (getattr(t, 'uvsDict', None) or {}).values():
+                for _cp, gname in entries:
+                    if gname:
+                        reach.add(gname)
+    seen = set()
+
+    def walk(obj, skip_attrs=()):
+        if id(obj) in seen:
+            return
+        seen.add(id(obj))
+        if isinstance(obj, str):
+            if obj in known:
+                reach.add(obj)
+            return
+        if isinstance(obj, (int, float, bytes, type(None), bool)):
+            return
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                walk(k, skip_attrs)
+                walk(v, skip_attrs)
+            return
+        if isinstance(obj, (list, tuple, set)):
+            for x in obj:
+                walk(x, skip_attrs)
+            return
+        for k, v in getattr(obj, '__dict__', {}).items():
+            if k in skip_attrs:
+                continue
+            walk(v, skip_attrs)
+
+    # 只看**会保留**的表：GPOS/GDEF 随后会被 add_mark_feature() 整个重建，
+    # 它们对旧字形的引用不算数（斜体基底就有只被旧 GPOS 引用的空字形）。
+    if 'GSUB' in font:
+        reach |= {g for g in gsub_outputs(font['GSUB'].table) if g in known}
+    # COLR 里 BaseGlyphPaintRecord.BaseGlyph 是"定义"不是"引用"：一个彩色基字形记录
+    # 如果既不在 cmap、也不是 GSUB 输出、也没被别的 paint 引用，它就是不可达的
+    # （Noto 有 12 个这样的空基字形记录，fontbakery 能检出，我们沿用同一判据）。
+    if 'COLR' in font:
+        # BaseGlyph = 基字形记录（定义）；clips = 裁剪框（字形属性）—— 都不是"引用"
+        walk(font['COLR'].table, skip_attrs=('BaseGlyph', 'clips'))
+    drop = [g for g in order if g != '.notdef' and g not in reach]
+    if drop:
+        drop_set = set(drop)
+        # 删字形前先摘掉 COLR 里指向它们的基字形记录，否则 COLR 会引用不存在的字形
+        if 'COLR' in font:
+            colr = font['COLR']
+            if colr.version == 0:
+                for g in drop:
+                    colr.ColorLayers.pop(g, None)
+            else:
+                bl = colr.table.BaseGlyphList
+                if bl is not None:
+                    bl.BaseGlyphPaintRecord = [r for r in bl.BaseGlyphPaintRecord
+                                               if r.BaseGlyph not in drop_set]
+                    bl.BaseGlyphCount = len(bl.BaseGlyphPaintRecord)
+                cl = getattr(colr.table, 'ClipList', None)
+                if cl is not None and getattr(cl, 'clips', None):
+                    for g in drop:
+                        cl.clips.pop(g, None)
+        for g in drop:
+            del font['glyf'].glyphs[g]
+            del font['hmtx'].metrics[g]
+        font.setGlyphOrder([g for g in order if g not in drop_set])
+    return len(drop)
+
+
+def drop_unreachable_glyphs(font, max_rounds=5):
+    """反复删不可达字形直到不动点。
+
+    删掉一个 COLR 基字形记录后，它引用的图层字形可能也变成孤儿（Noto 的 emoji 就有这种
+    链式结构），所以要迭代。
+    """
+    total = 0
+    for _ in range(max_rounds):
+        n = _drop_unreachable_once(font)
+        total += n
+        if not n:
+            break
+    return total
+
+
+# JuliaMono 快照里只有科普特**小写**（U+2CAF psi、U+2CDF Old Nubian NGI，另有 2CB2/2CB3），
+# 没有对应大写，fontbakery 的 case_mapping 会 FAIL。这两对按「大写 = 小写统一缩放到
+# cap height、水平居中、advance 仍是一格」合成：与本字体自己的 cap/x 高度体系一致，
+# 也避免把比例字体（Noto Sans Coptic 的大写 psi adv=834）硬塞进 550 的等宽格子。
+COPTIC_CASE_PAIRS = [(0x2CAE, 0x2CAF), (0x2CDE, 0x2CDF)]
+
+# 设计上的 cap height（upem=1000，实测 roman 面 'H' 的 yMax）。
+# **不能用 'H' 的 bbox 现算**：斜体面的 'H' 是倾斜的，轴对齐 bbox 会被放大
+# （italic H yMax=776，而真实 cap 仍是 668，多出来的 ≈ 450×tan(12.7°)）。
+# 用常量还能保证四个 face 合成出来的大写高度一致。
+CAP_HEIGHT = 668
+
+
+def add_coptic_capitals(font):
+    """从本 face 的科普特小写合成缺的大写。返回合成个数。
+
+    缩放规则（可复现）：``s = min(cap_height / h, (CELL-10) / w)``，然后水平居中、
+    基线对齐（``y0 -> 0``）。psi 的小写本来就画到 cap height，所以 s≈1.00；
+    NGI 是 x-height，会放大到约 1.46 倍。
+    """
+    cmap = font.getBestCmap()
+    gs = font.getGlyphSet()
+    cap = CAP_HEIGHT
+    max_ink = CELL - 10                     # 左右各留 5 单位余量
+    n = 0
+    for cap_cp, small_cp in COPTIC_CASE_PAIRS:
+        if cap_cp in cmap or small_cp not in cmap:
+            continue
+        bp = BoundsPen(gs)
+        gs[cmap[small_cp]].draw(bp)
+        if not bp.bounds:
+            continue
+        x0, y0, x1, y1 = bp.bounds
+        w, h = x1 - x0, y1 - y0
+        if w <= 0 or h <= 0:
+            continue
+        s = min(cap / h, max_ink / w)
+        dx, dy = (CELL - w * s) / 2 - x0 * s, -y0 * s
+        rec = DecomposingRecordingPen(gs)
+        gs[cmap[small_cp]].draw(rec)
+        pen = TTGlyphPen(None)
+        rec.replay(TransformPen(pen, Transform(s, 0, 0, s, dx, dy)))
+        glyph = pen.glyph()
+        name = 'uni%04X' % cap_cp
+        font.setGlyphOrder(font.getGlyphOrder() + [name])
+        font['glyf'].glyphs[name] = glyph
+        glyph.recalcBounds(font['glyf'])
+        font['hmtx'].metrics[name] = (CELL, glyph.xMin)
+        for sub in font['cmap'].tables:
+            if sub.isUnicode() and sub.format in (4, 12):
+                sub.cmap[cap_cp] = name
+        n += 1
+    return n
+
+
+def finalize_widths_and_order(font, n_ctl=0):
+    """0 宽化隐形字形 →（可选）删控制码映射 → 重排字形。返回各项计数。
+
+    顺序很重要：先 0 宽化，重排才知道哪些字形是 0 宽；重排又必须在建 GPOS 之前。
+    调用方随后用新字序建 GPOS（见 ``compact_hmtx`` 的说明）。
+    ``n_ctl`` 允许调用方已经提前删过控制码（可达性判断需要最终的 cmap）。
+    """
+    n_mark, n_ign = zero_invisible_widths(font)
+    if not n_ctl:
+        n_ctl = drop_control_cmap(font)
+    n_tail = compact_hmtx(font)
+    return n_mark, n_ign, n_ctl, n_tail
 
 
 def strip_locl(font):
@@ -598,7 +1061,7 @@ def add_mark_feature(font):
         # 这些多是 Nerd Font 图标字形，不需要当组合符的基准
         if g.startswith('.') or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_.]*', g):
             continue
-        if unicodedata.category(chr(cp)) in ('Mn', 'Me'):
+        if is_combining_mark(cp):
             if g not in seen_m:
                 seen_m.add(g); marks.append(g)
         elif g not in seen_b:
@@ -606,26 +1069,167 @@ def add_mark_feature(font):
     if not marks or not bases:
         return 0
 
-    fea = (f'markClass [{" ".join(marks)}] <anchor {CELL // 2} 0> @MC;\n'
-           f'feature mark {{\n'
-           f'  position base [{" ".join(bases)}] <anchor {CELL // 2} 0> mark @MC;\n'
-           f'}} mark;\n')
-    addOpenTypeFeaturesFromString(font, fea)
+    # ---- mark-to-mark（组合符叠加）----
+    # 只做 mark-to-base 时，第二个组合符会和第一个**完全重叠**。这里按每个标记自身墨迹的
+    # 顶（above）/底（below）生成锚点，让第二个标记叠在第一个上方/下方：
+    #   · above 标记：锚点 (275, yMax)，第二个 above 标记落在它顶上
+    #   · below 标记：锚点 (275, yMin)，第二个 below 标记落在它底下
+    # 高度按 20 单位量化，把 379 个标记压成 ~58 档，避免 GPOS 膨胀。
+    gs = font.getGlyphSet()
+    rev = {}
+    for cp, g in cmap.items():
+        rev.setdefault(g, cp)
+    BELOW_CC = {202, 216, 218, 220, 224, 226, 240}
+    above_h, below_m = {}, {}
+    for g in marks:
+        bp = BoundsPen(gs)
+        gs[g].draw(bp)
+        if not bp.bounds:
+            continue
+        ymin, ymax = bp.bounds[1], bp.bounds[3]
+        cc = unicodedata.combining(chr(rev[g])) if g in rev else 0
+        is_below = (ymin + ymax) < 0 or (cc in BELOW_CC and ymax < 600)
+        if is_below:
+            below_m[g] = int(round(ymin / 20.0)) * 20
+        else:
+            above_h[g] = int(round(ymax / 20.0)) * 20
+    top_classes, bot_classes = {}, {}
+    for g, h in above_h.items():
+        top_classes.setdefault(h, []).append(g)
+    for g, m in below_m.items():
+        bot_classes.setdefault(m, []).append(g)
+
+    cx = CELL // 2
+    lines = []
+    mcls = []
+    if top_classes:
+        mcls.append(f'markClass [{" ".join(sorted(above_h))}] <anchor {cx} 0> @MC_ABOVE;')
+        for h in sorted(top_classes):
+            mcls.append(f'markClass [{" ".join(sorted(top_classes[h]))}] <anchor {cx} {h}> @TOP_{h};')
+    if bot_classes:
+        mcls.append(f'markClass [{" ".join(sorted(below_m))}] <anchor {cx} 0> @MC_BELOW;')
+        for m in sorted(bot_classes):
+            mcls.append(f'markClass [{" ".join(sorted(bot_classes[m]))}] <anchor {cx} {m}> @BOT_{m};')
+    lines.append('languagesystem DFLT dflt;')
+    # 只注册字体实际覆盖的脚本（含 Inherited 组合符被这些脚本借用的情况）。
+    # 不注册的话 HarfBuzz 在 hebr/arab 等脚本下找不到 mark 特性（实测希伯来文会退回
+    # 启发式定位），而 DFLA 回退并不可靠。
+    for tag in ('latn', 'grek', 'cyrl', 'hebr', 'arab', 'armn', 'geor'):
+        lines.append(f'languagesystem {tag} dflt;')
+    lines.append('feature mark {')
+    if top_classes:
+        lines.append(f'  position base [{" ".join(bases)}] <anchor {cx} 0> mark @MC_ABOVE;')
+        for h in sorted(top_classes):
+            lines.append(f'  position mark @TOP_{h} <anchor {cx} {h}> mark @MC_ABOVE;')
+    if bot_classes:
+        lines.append(f'  position base [{" ".join(bases)}] <anchor {cx} 0> mark @MC_BELOW;')
+        for m in sorted(bot_classes):
+            lines.append(f'  position mark @BOT_{m} <anchor {cx} {m}> mark @MC_BELOW;')
+    lines.append('} mark;')
+    fea = '\n'.join(mcls + lines) + '\n'
+    # 只重建 GPOS/GDEF！feaLib 默认 tables=None 会把 GSUB 也一起重建，而这段 fea
+    # 里没有任何 GSUB 特性 —— 结果它先建出一个空 GSUB，再 del font["GSUB"]，
+    # 把 Merger 合并进来的 Noto ccmp（键盘帽/旗帜/ZWJ/Tag flag 的连字）整表删掉。
+    addOpenTypeFeaturesFromString(font, fea, tables=['GPOS', 'GDEF'])
     return len(marks)
+
+
+def add_stat_table(font, weight, italic):
+    """写入 STAT（Style Attributes）表：``wght`` + ``ital`` 两个轴，每个 face 每轴只写 1 条。
+
+    两个轴都写的原因：
+      · ``ital`` 是现代应用/新系统读斜体的标准入口：正体 0、斜体 1，且必须排在**最后一个轴**；
+        正体还要 elidable(0x0002) + ``LinkedValue = 1.0``（正体 ↔ 斜体互指），斜体 flags=0。
+      · ``wght`` 让 STAT 里带上重量信息（400/700），而不是只靠 ``OS/2.usWeightClass`` 去猜。
+
+    **静态字体每个轴只能有 1 条 AxisValue**（fontbakery 的 ``STAT_in_statics``）。把变量字体的
+    STAT 原样塞进静态字体会让 Windows 只读第一条记录 —— 于是所有字重都显示成同一个名字。
+
+    ``macNames=False``：本项目已删除全部 Mac(platform 1) name 记录（fontbakery 的
+    ``no_mac_entries``），而 buildStatTable 默认会把这些记录重新加回来。
+    """
+    is_bold = weight >= 700
+    axes = [
+        dict(tag='wght', name='Weight', ordering=0,
+             values=[dict(value=weight, name='Bold' if is_bold else 'Regular',
+                          flags=0 if is_bold else 0x0002)]),
+        # ital 必须最后；正体带 elidable + linkedValue，斜体两个都不带
+        dict(tag='ital', name='Italic', ordering=1,
+             values=[dict(value=1, name='Italic')] if italic else
+                    [dict(value=0, name='Regular', flags=0x0002, linkedValue=1.0)]),
+    ]
+    buildStatTable(font, axes, elidedFallbackName='Regular', macNames=False)
+
+
+# smart dropout：PUSHW 511 / SCANCTRL（无条件打开 dropout control）/ PUSHB 4 / SCANTYPE
+# （smart 规则）。fontbakery 的 `smart_dropout` 就是在 prep 里找这 7 个字节，这也是
+# gftools fix-nonhinting 对「未 hinting 字体」的标准处理。
+SMART_DROPOUT = bytes.fromhex('b801ff85b0048d')
+
+
+def add_smart_dropout_prep(font):
+    """给未 hinting 的字体补一个只含 smart dropout 开关的 ``prep`` 表。
+
+    本字体完全没有 hinting（无 cvt/fpgm，0 个字形带指令），此时各渲染器对
+    「dropout control」的默认值不一致：小字号下 1px 细线可能整段消失
+    （我们的 `|` 只有 88/1000 em，@12px ≈ 1.06 px，正好在这个区间）。
+    这 7 个字节不调整任何轮廓点，只把这个开关显式打开；不会把字体变成 hinted。
+    """
+    asm = 'PUSHW[1] 511\nSCANCTRL[]\nPUSHB[1] 4\nSCANTYPE[]'
+    prog = Program()
+    prog.fromAssembly(asm)
+    assert prog.getBytecode() == SMART_DROPOUT      # 防止 fontTools 汇编器行为变化
+    if 'prep' in font:
+        old = font['prep'].program.getBytecode()
+        if SMART_DROPOUT in old:
+            return False
+        prog = Program()
+        prog.fromBytecode(old + SMART_DROPOUT)      # 保留已有 prep，追加我们的片段
+    prep = newTable('prep')
+    prep.program = prog
+    font['prep'] = prep
+    return True
 
 
 def set_face_meta(font, subfamily, weight, bold, italic):
     psname = f'{FAMILY}-{subfamily.replace(" ", "")}'
     name = font['name']
+    # 删掉所有 Mac(platform 1) name 记录：OpenType 现代实践已不再需要（Apple 自己
+    # 的 SF 系列也不带），fontbakery 的 `no_mac_entries` 会报。上游基底带的那些遗留
+    # 记录（如 ID0=ComicShanns 的版权）也正是从这儿来的，会被一并清掉。
+    name.names = [r for r in name.names if r.platformID != 1]
+    # name ID3（Unique ID）以前完全没人管，一直是上游的 "ComicShannsMono Nerd Font Mono 3.5.1"。
+    # 按惯例写成 "<version>;<vendor>;<psname>"。
+    unique_id = f'Version {VERSION};NONE;{psname}'
     for nid, val in ((0, COPYRIGHT), (1, FAMILY), (2, subfamily),
-                     (4, f'{FAMILY} {subfamily}'), (5, 'Version 1.0'),
-                     (6, psname), (13, LICENSE_DESC), (14, LICENSE_URL)):
+                     (3, unique_id), (4, f'{FAMILY} {subfamily}'),
+                     (5, f'Version {VERSION}'), (6, psname),
+                     (16, FAMILY), (17, subfamily),
+                     (13, LICENSE_DESC), (14, LICENSE_URL),
+                     # 元数据补全：厂商/设计者/简介/两个 URL/样文/WWS 命名
+                     (8, VENDOR_NAME), (9, DESIGNER_NAME), (10, DESCRIPTION),
+                     (11, VENDOR_URL), (12, DESIGNER_URL), (19, SAMPLE_TEXT),
+                     (21, FAMILY), (22, subfamily)):
         for rec in list(name.names):
             if rec.nameID == nid:
                 rec.string = val
         name.setName(val, nid, 3, 1, 0x409)
-        name.setName(val, nid, 1, 0, 0)
+
     os2 = font['OS/2']
+    head = font['head']
+    hhea = font['hhea']
+
+    # ---- 版本：head.fontRevision 必须和 name ID5 一致（Regular/Bold 原来继承 Noto 的 2.057、
+    #      斜体继承 SeriousShanns 的 4.0，而 name 写的是 1.0）----
+    head.fontRevision = float(VERSION)
+
+    # ---- 时间戳固定，保证 byte-identical 构建 ----
+    #      TTFont.save() 默认 recalcTimestamp=True 会用「当前时间」覆盖 modified，
+    #      所以必须同时关掉，否则每次构建 head 都不同。
+    head.created = head.modified = BUILD_TIME
+    font.recalcTimestamp = False
+
+    # ---- 字重 / 斜体标记 ----
     os2.usWeightClass = weight
     fs = 0
     if bold:
@@ -634,10 +1238,37 @@ def set_face_meta(font, subfamily, weight, bold, italic):
         fs |= 0x01
     if not bold and not italic:
         fs = 0x40
+    fs |= 0x80           # USE_TYPO_METRICS：行距用 typo 值，win 值只管不裁剪
     os2.fsSelection = fs
-    font['head'].macStyle = (0x01 if bold else 0) | (0x02 if italic else 0)
-    if 'post' in font:
-        font['post'].italicAngle = -12.5 if italic else 0.0
+    head.macStyle = (0x01 if bold else 0) | (0x02 if italic else 0)
+
+    # ---- 纵向指标：四 face 必须完全一致 ----
+    os2.sTypoAscender, os2.sTypoDescender, os2.sTypoLineGap = ASCENT, DESCENT, 0
+    os2.usWinAscent, os2.usWinDescent = WIN_ASCENT, WIN_DESCENT
+    hhea.ascent, hhea.descent, hhea.lineGap = ASCENT, DESCENT, 0
+
+    # ---- 等宽元数据 ----
+    os2.xAvgCharWidth = CELL
+    os2.fsType = 0                      # 统一为可安装（斜体面原来继承 SeriousShanns 的 4=Preview&Print）
+    post = font['post']
+    post.isFixedPitch = 1               # 等宽字体必须非 0（原来被 Merger 弄成 0）
+    post.underlinePosition = UNDERLINE_POSITION
+    post.underlineThickness = UNDERLINE_THICKNESS
+    post.italicAngle = ITALIC_ANGLE if italic else 0.0
+    hhea.caretSlopeRise = 1000 if italic else 1
+    hhea.caretSlopeRun = round(math.tan(math.radians(-ITALIC_ANGLE)) * 1000) if italic else 0
+
+    # ---- STAT：样式菜单（wght + ital），每个 face 每轴 1 条 ----
+    add_stat_table(font, weight, italic)
+
+    # ---- 未 hinting 字体：补 smart dropout 开关（prep，7 字节） ----
+    add_smart_dropout_prep(font)
+
+    # ---- 收尾：重算 Unicode/代码页范围 ----
+    #      （0 宽化 / 删控制码 / 重排字形已在 build_face 里、建 GPOS 之前做完）
+    os2.recalcUnicodeRanges(font)
+    os2.recalcCodePageRanges(font)
+    print(f'  元数据：v{VERSION}，typo {ASCENT}/{DESCENT}，win {WIN_ASCENT}/{WIN_DESCENT}')
     return font
 
 
@@ -667,6 +1298,20 @@ def build_face(style, base_key, julia_key, emoji, overwrite):
     # 这样本字体就是 ComicShanns ∪ JuliaMono ∪ NotoEmoji，fallback 链里不需要 JuliaMono 了
     julia_all = [cp for cp in julia.getBestCmap() if cp not in noto_cmap]
     n += copy_julia_into(base, julia, [], julia_all, False, skip=noto_cmap)
+
+    # 覆盖率对齐：斜体基底 SeriousShanns（NF 3.2.1）缺一批 Nerd Font 3.5.1 的 PUA 图标，
+    # 而 JuliaMono 快照也是更旧的 3.4.0，补不上 → 斜体面会比正体少 215 个图标码点。
+    # 从**同字重**的 ComicShanns 基底补（只补 PUA，避免把直立拉丁混进斜体）。
+    if base_key.startswith('ssh'):
+        ref = flatten_scale_font(TTFont(SRC['comic_r' if base_key == 'ssh_i' else 'comic_b']), 1.0)
+        ref_cmap = ref.getBestCmap()
+        cur = base.getBestCmap()
+        gap = sorted(cp for cp in ref_cmap
+                     if cp not in cur and (0xE000 <= cp <= 0xF8FF or 0xF0000 <= cp <= 0x10FFFD))
+        if gap:
+            filled = copy_julia_into(base, ref, [], gap, False, suffix='.comic')
+            print(f'  覆盖率对齐：从 Comic 补入 {filled} 个 PUA 图标')
+
     z = zero_width_marks(base)
     print(f'  Julia 层拷入 {n} 个码点（其中组合标记 0 宽化 {z} 个）')
 
@@ -680,6 +1325,10 @@ def build_face(style, base_key, julia_key, emoji, overwrite):
                 del noto[tag]
         font = merge_noto_emoji(base, noto, base_names)
         apply_emoji_presentation(font, noto, plan)
+        # ZWJ 连字要同时接受 VS16 选中的彩色字形（否则 ❤️‍🔥 🏳️‍🌈 这类标准写法会散开）
+        n_var = add_colour_ligature_variants(font)
+        if n_var:
+            print(f'  ZWJ 连字彩色变体：+{n_var} 条')
         print(f'  emoji 层合并完成，glyph 数: {len(font.getGlyphOrder())}')
     else:
         # 非 emoji 的 face 没有彩色字形，但同样需要「默认文本呈现」符号的单色轮廓；
@@ -690,8 +1339,24 @@ def build_face(style, base_key, julia_key, emoji, overwrite):
         fill_mono_symbols(base, julia, need_mono)
         font = base
 
+    # Coptic 大写缺失：从本 face 的小写合成（要在 GPOS/重排之前，新字形才会被算进去）
+    n_coptic = add_coptic_capitals(font)
+    if n_coptic:
+        print(f'  Coptic 大写：从对应小写合成 {n_coptic} 个（缩放到 cap，advance {CELL}）')
+
+    # 先删控制码映射：可达性判断要基于**最终**的 cmap（否则 CR 这类字形会被算成可达）
+    n_ctl = drop_control_cmap(font)
+
+    # 删掉上游未编码字形 + 合并改名后的 .null/.notdef 副本（删字形会改 GID，必须在 GPOS 前）
+    n_dead = drop_unreachable_glyphs(font)
+    if n_dead:
+        print(f'  清理不可达字形：{n_dead} 个（上游未编码 / 合并改名副本）')
+
+    # 0 宽化 / 重排字形也必须在建 GPOS **之前**（见 compact_hmtx 的说明）
+    n_mark, n_ign, n_ctl, n_tail = finalize_widths_and_order(font, n_ctl)
     m = add_mark_feature(font)
-    print(f'  GPOS mark 锚定：{m} 个组合标记')
+    print(f'  GPOS mark 锚定：{m} 个组合标记；0 宽化 标记 {n_mark} + 隐形 {n_ign}，'
+          f'删控制码 {n_ctl}，等宽尾段 {n_tail} 个字形')
 
     weight = 700 if style in ('Bold', 'Bold Italic') else 400
     bold = style in ('Bold', 'Bold Italic')
@@ -715,6 +1380,7 @@ def check_sources():
 
 
 def main():
+    ensure_reproducible_hash_seed()   # 不满足则带着 PYTHONHASHSEED=0 重启，保证可复现
     if not check_sources():
         return 1
     os.makedirs(DIST, exist_ok=True)

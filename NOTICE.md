@@ -27,7 +27,7 @@ ComicMathMono 是**衍生作品**。`dist/` 下的成品字体和 `sources/` 下
 
 ### Noto Color Emoji（COLRv1）— SIL Open Font License 1.1
 - 用途：彩色 emoji
-- 版本：`2.042`
+- 版本：`2.057`（Unicode 18.0，2026-09）
 - 上游：<https://github.com/googlefonts/noto-emoji>
 - 版权：Copyright 2022 Google Inc.
 

@@ -18,13 +18,24 @@
 
 默认从 `/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc` 里挑 **SC（简体）** 那一面。
 子集字体以 SIL OFL-1.1 分发（Noto Sans CJK 的原始许可），版权与许可声明保留在 name 表里。
+
+输出是 **TrueType（glyf）**而非 CFF：Noto Sans CJK 本体是 CFF，这里用 cu2qu 转成二次曲线再写出。
+（若直接输出 CFF，build.py 里还得再做一次 CFF→glyf；哪一步漏了 cu2qu，字形 flags 里就会留下
+fontTools 的保留位 bit7=0x80，OTS 会拒收整份字体 —— 正是本项目修过的那个 P0。）
 """
 import argparse
 import os
 import sys
 
 from fontTools import subset
-from fontTools.ttLib import TTFont
+from fontTools.misc import timeTools
+from fontTools.pens.cu2quPen import Cu2QuPen
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTFont, newTable
+
+# 固定时间戳，和 build.py 一样保证可复现（head 里的秒是「1904 起算」）
+SOURCE_DATE_EPOCH = int(os.environ.get('SOURCE_DATE_EPOCH', '946684800'))
+BUILD_TIME = SOURCE_DATE_EPOCH - timeTools.epoch_diff
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_SRC = '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc'
@@ -33,6 +44,44 @@ UNICODES = [0x3030, 0x303D, 0x3297, 0x3299, 0x1F237]
 DROP_TABLES = ['GSUB', 'GPOS', 'GDEF', 'BASE', 'JSTF', 'MATH', 'morx', 'kern',
                'vhea', 'vmtx', 'VORG', 'DSIG', 'hdmx', 'LTSH', 'VDMX', 'gasp',
                'meta', 'STAT', 'fvar', 'gvar', 'avar', 'HVAR', 'MVAR', 'VVAR']
+
+
+def cff_to_glyf(font):
+    """把 CFF（三次贝塞尔）就地转成 glyf（二次），产出真正的 TrueType。
+
+    之前这个工具直接输出 CFF/OTTO，build.py 里再做一次转换；一旦哪一步漏了 cu2qu，
+    字形 flags 里就会留下 fontTools 的保留位 bit7（0x80），OTS 会拒收整份字体。
+    让「子集 → 成品」两步都是 TrueType，隐患少一半；build.py 里的 CFF 分支保留作兜底。
+    """
+    glyph_set = font.getGlyphSet()
+    order = font.getGlyphOrder()
+    glyphs = {}
+    for name in order:
+        pen = TTGlyphPen(glyph_set)
+        glyph_set[name].draw(Cu2QuPen(pen, max_err=1.0, reverse_direction=True))
+        glyphs[name] = pen.glyph()
+    glyf = newTable('glyf')
+    glyf.glyphOrder = order
+    glyf.glyphs = glyphs
+    font['glyf'] = glyf
+    # CFF 源没有 loca；glyf.compile() 会把 offsets 写进 ttFont['loca']，所以必须建一个空表
+    font['loca'] = newTable('loca')
+    for tag in ('CFF ', 'CFF2', 'VORG'):
+        if tag in font:
+            del font[tag]
+    # CFF 的 maxp 是 0.5；带 glyf 的表必须是 1.0。
+    # maxp.recalc() 只重算轮廓相关的值，**指令相关的 max 值不管**，而 CFF 源的 maxp
+    # 里根本没有这些字段 → 直接编译会 KeyError('maxZones')。本字体无 hinting，给默认值。
+    mp = font['maxp']
+    mp.tableVersion = 0x00010000
+    for key, val in (('maxZones', 2), ('maxTwilightPoints', 0), ('maxStorage', 0),
+                     ('maxFunctionDefs', 0), ('maxInstructionDefs', 0),
+                     ('maxStackElements', 0), ('maxSizeOfInstructions', 0),
+                     ('maxComponentElements', 0), ('maxComponentDepth', 0)):
+        if not hasattr(mp, key):
+            setattr(mp, key, val)
+    font.sfntVersion = '\x00\x01\x00\x00'   # TrueType，而非 'OTTO'
+    return len(order)
 
 
 def find_sc_face(path):
@@ -96,6 +145,11 @@ def main():
     name.setName('ComicMathMono-CJKSymbolSubset', 4, 3, 1, 0x409)
     name.setName('ComicMathMono-CJKSymbolSubset', 6, 3, 1, 0x409)
     name.setName('Version 1.0', 5, 3, 1, 0x409)
+
+    # CFF → TrueType，并固定时间戳（可复现）
+    cff_to_glyf(font)
+    font['head'].created = font['head'].modified = BUILD_TIME
+    font.recalcTimestamp = False
 
     font.save(args.out)
     out_font = TTFont(args.out, lazy=True)

@@ -62,12 +62,17 @@ q + U+0301：基准 'q' 墨迹 x=[66,499]（格子中心 275）
 （acutecomb 自身墨迹 x=[182,367]，中心正好 275），而 HarfBuzz 在没有 GPOS 时用的启发式
 假设标记是「设计在基字之后的笔位」，于是把它推到了右边。
 
-所以 `build.py` 现在会生成一个 GPOS `mark` 特性（355 个组合符），锚点取 `(格子中心, 基线)`：
+所以 `build.py` 现在会生成一个 GPOS `mark` 特性（400 个组合符），锚点取 `(格子中心, 基线)`：
 
 ```python
-markClass [<355 个组合符>] <anchor 275 0> @MC;
+markClass [<400 个组合符>] <anchor 275 0> @MC;
 feature mark { position base [<所有非标记字形>] <anchor 275 0> mark @MC; } mark;
 ```
+
+> **不能只用 `unicodedata.category()` 判 Mn/Me**：Python 3.13 的 Unicode 数据是 15.1，
+> 而 JuliaMono 快照已到 Unicode 16 —— `U+1ACF..U+1ADD`、`U+1AE0..U+1AE5` 这 21 个新组合符
+> 会被判成 `Cn`（未分配），从而**既没 0 宽化、也没进 GPOS mark**（fontbakery 的
+> `gdef_mark_chars` 会报）。`build.py` 用 `is_combining_mark()`（区块判定 ∪ 类别）来兜底。
 
 标定过程中确认了一个容易搞错的细节：**HarfBuzz 在应用 mark-to-base 时还会再减去基准字形的
 advance**，所以「锚点 x 相同」才会得到「刚好左移一格」的位移（-550）：
@@ -107,8 +112,11 @@ q + U+0301  ->  (q, x_advance=550, x_offset=0) + (标记, x_advance=0, x_offset=
 
 - **定位精度**：已生成 GPOS `mark` 锚定（见第 4 节），横向回到格子中心；
   纵向保持标记的设计位置（基线对齐），不做逐字形的"贴顶"微调。
-- **标记不能叠加**：只做了 mark-to-base，没做 mark-to-mark —— 一个基准字形带两个组合符时
-  它们会重合，而不是往上叠。
+- **叠加规则是"贴顶/贴底"**：已生成 mark-to-mark。每个标记按自身墨迹分成 above / below
+  两类，第二个同类标记会落在前一个的墨迹顶（above）或底（below）上；跨类（above 后跟 below）
+  仍回落到 mark-to-base 的设计位置。高度量化到 20 单位，以避免 GPOS 膨胀。
+- **脚本注册**：`mark` 特性注册在 `DFLT` + `latn/grek/cyrl/hebr/arab/armn/geor` 下。
+  实测只注册 `DFLT` 时，希伯来文会退回 HarfBuzz 的启发式定位（偏移全是猜的）。
 - **`U+20E3` 键盘帽**：`1️⃣`（`0031 FE0F 20E3`）曾因"合并重命名"失效（渲染成"数字 + 帽框"
   两个字形）。已由 `build.py` 的 `revive_renamed_rules()` 修复，详见
   [`merge-renaming.md`](merge-renaming.md)。

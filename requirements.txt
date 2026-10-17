@@ -1,1 +1,8 @@
+# 构建
 fontTools==4.63.0
+
+# tools/verify.py 的校验依赖：
+#   opentype-sanitizer —— 内嵌 ots-sanitize（浏览器就是用它决定收不收字体）
+#   uharfbuzz          —— 实测 emoji 序列（键盘帽/旗帜/ZWJ）是否合成成单字形
+opentype-sanitizer==9.2.0
+uharfbuzz==0.56.3

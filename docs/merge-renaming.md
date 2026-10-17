@@ -3,6 +3,8 @@
 > `locl-issue.md`（数字消失）、`combining-marks.md`（组合符）之后的第三篇。
 > 这篇讲 **fontTools `Merger` 重命名字形** 带来的副作用，以及 `keycap emoji`（`1️⃣`）
 > 为什么坏掉、怎么修。修复函数是 `build.py` 里的 `revive_renamed_rules()`。
+> 这个修复后来又被两步各自破坏过一次（feaLib 重建 GSUB、cmap14 与连字字形不一致），
+> 见 §3.1 / §3.2。
 
 ## 1. 现象
 
@@ -74,7 +76,39 @@ keycap 连字 12 条全部"死规则"：
 🇨🇳 -> 1 个字形                  ✅ 国旗（本来就没坏）
 ```
 
-## 4. 同一根源的另一个现象（尚未处理）
+### 3.1 后续坑一：这个修复曾被下一步整表删掉
+
+上面的修复只是把规则**改对**，但构建流程后面还有一步会把它**删掉**：
+`add_mark_feature()` 里的 `addOpenTypeFeaturesFromString(font, fea)` 默认
+`tables=None`，feaLib 会把 GSUB 也重建一遍；而这段 fea 里没有任何 GSUB 特性，
+于是它建出一个空 GSUB 后再 `del font["GSUB"]`，Noto 的 `ccmp`
+（键盘帽 / 旗帜 / ZWJ / Tag flag）全部消失。
+
+现在改成 `tables=['GPOS', 'GDEF']`，只重建真正需要的表；`verify.py` 里有
+「GSUB 必须存在且含 ccmp」以及 HarfBuzz 实测序列能合成单字形的断言。
+
+### 3.2 后续坑二：带 VS16 的键盘帽还需要 cmap14 配合
+
+即使 GSUB 保住了，**RGI 正规写法** `0031 FE0F 20E3` 仍会散成两个字形：
+
+```
+ccmp 连字:              one  + uni20E3  → 键盘帽
+cmap14 (0031, FE0F):          → one.1   （Noto 的彩色数字）
+one ≠ one.1  →  连字匹配不上
+```
+
+根因：`apply_emoji_presentation()` 的策略是「文本默认的 emoji，VS16 给彩色字形」，
+它把这套也套在了键盘帽基字符（`0-9` `#` `*`）上；但 ccmp 连字的输入是**默认字形**。
+
+修法：这 12 个码点的变体序列一律写成 **DefaultUVS**（沿用默认字形，`uvsDict` 中值为
+`None`），不参与「换彩色字形」。其它「文本默认」emoji（`© ® ❤ ▪ …`）不受影响，
+仍按 VS15/VS16 在单色/彩色间切换。
+
+这不是特例：**Noto Color Emoji 的 371 条 FE0F 全是 DefaultUVS**（emoji 字体的默认
+字形本身就是 emoji 字形）。通用原则是 —— **cmap14 选中的字形，必须和后续连字要匹配
+的字形一致**。
+
+## 4. 同一根源的另一个现象（已由 emoji-presentation.md 处理）
 
 同一套"重命名 / base 优先"的规则，还让 **45 个码点显示的是 base 的字形，
 而不是 Noto 的彩色 emoji**：
