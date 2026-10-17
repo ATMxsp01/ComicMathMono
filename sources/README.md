@@ -97,7 +97,7 @@ emoji 的行为由三个输入共同决定，**升级任何一个都要检查另
 5. 检查构建日志的 `emoji 呈现：默认彩色 N 个交还 Noto；无单色源丢弃 M 个`：
    如果 **M 突然变大**，说明新 emoji 在 Nerd Fonts / JuliaMono / Noto Sans Symbols 里
    都找不到单色轮廓，需要补源（否则文本呈现会缺字形）。
-6. `fontbakery check-universal dist/*.ttf`（应保持 **FAIL 0**；WARN 的 8 类是已知取舍，
+6. `fontbakery check-universal dist/*.ttf`（应保持 **FAIL 0**；WARN 的 9 类 / 48 条是已知取舍，
    见 `docs/fontbakery-warnings.md` 的说明）。
 7. 更新本文件版本表、`NOTICE.md`（上游版权与版本）、`README.md` 的覆盖数字。
 8. 提交 `dist/`（CI 会重新构建并校验 byte-identical）。

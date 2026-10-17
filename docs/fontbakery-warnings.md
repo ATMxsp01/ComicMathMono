@@ -15,7 +15,7 @@ fontbakery check-universal --skip-network dist/*.ttf
 | 项目 | 结果 |
 |---|---|
 | FAIL | **0** |
-| WARN | 32（8 类 × 4 face） |
+| WARN | 48（9 个检查 code × 4 face；本文 §2 按 8 个小节归类，其中 2.5 含 2 个 code） |
 | PASS | 见运行输出 |
 
 C5 之前是 40 条（10 类）。已修掉的两类见 §1、§2。
@@ -54,7 +54,7 @@ C5 之前是 40 条（10 类）。已修掉的两类见 §1、§2。
 
 ---
 
-## 2. 有意保留的 WARN（4 类 × 4 face = 32 条）
+## 2. 有意保留的 WARN（9 个 code × 4 face = 48 条）
 
 ### 2.1 `contour_count`（`contour-count`）
 
@@ -136,7 +136,7 @@ emoji 把平均值拉高）。
 
 **检查什么**：文件是否 < 1 MB。
 
-**报什么**：8.3 MB。
+**报什么**：8.3–8.4 MB。
 
 **为什么不修**：彩色 emoji 本体就有 8 MB。四个 face 都带 emoji 是 **A1 的明确决策**
 （保证任何字重下 emoji 都不回退到别的字体）。

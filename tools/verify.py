@@ -40,6 +40,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'dist')
 FACES = ['Regular', 'Bold', 'Italic', 'BoldItalic']
 ALLOWED_WIDTHS = {0, 550, 1100}
+KEYCAP_BASES = frozenset([0x23, 0x2A] + list(range(0x30, 0x3A)))
 # 每个 face 必须完整覆盖的源字体（本字体 = 基底 ∪ JuliaMono ∪ NotoEmoji）
 CJK_SUBSET = 'NotoSansCJKsc-Symbols5.ttf'   # tools/make_cjk_symbol_subset.py 生成
 SUPERSET = {
@@ -142,6 +143,26 @@ def emoji_presentation_set():
     return out
 
 
+def emoji_codepoint_set():
+    """Emoji=Yes 的码点（含文本默认呈现的那批）。"""
+    path = os.path.join(ROOT, 'data', 'emoji-data.txt')
+    out = set()
+    if not os.path.exists(path):
+        return out
+    with open(path, encoding='utf-8') as fh:
+        for line in fh:
+            line = line.split('#')[0].strip()
+            if not line:
+                continue
+            rng, prop = (x.strip() for x in line.split(';'))
+            if prop != 'Emoji':
+                continue
+            a, b = ((int(x, 16) for x in rng.split('..')) if '..' in rng
+                    else (int(rng, 16),) * 2)
+            out.update(range(a, b + 1))
+    return out
+
+
 EMOJI_SEQUENCES = {
     'keycap 1\u20e3': '1\u20e3',
     'keycap 1\ufe0f\u20e3': '1\ufe0f\u20e3',          # RGI 正规写法（带 VS16）
@@ -173,7 +194,10 @@ def check_emoji_sequences(face, path):
         notes.append('未安装 uharfbuzz，跳过 emoji 序列 shaping 校验'
                      '（pip install uharfbuzz）')
         return
-    order = TTFont(path, lazy=True).getGlyphOrder()
+    tt = TTFont(path, lazy=False)
+    order = tt.getGlyphOrder()
+    hmtx = tt['hmtx']
+    colr = {r.BaseGlyph for r in tt['COLR'].table.BaseGlyphList.BaseGlyphPaintRecord}
     blob = hb.Blob.from_file_path(path)
     font = hb.Font(hb.Face(blob))
     for label, text in EMOJI_SEQUENCES.items():
@@ -184,6 +208,12 @@ def check_emoji_sequences(face, path):
         if len(buf.glyph_infos) != 1:
             glyphs = ', '.join(order[i.codepoint] for i in buf.glyph_infos)
             fail(f'{face}: emoji 序列「{label}」没有合成成单字形（得到 {len(buf.glyph_infos)} 个：{glyphs}）')
+        else:
+            gid = buf.glyph_infos[0].codepoint
+            adv = buf.glyph_positions[0].x_advance
+            if adv != 1100 or order[gid] not in colr:
+                fail(f'{face}: emoji 序列「{label}」应为 1100 宽的彩色字形，'
+                     f'实际 {order[gid]} adv={adv} color={order[gid] in colr}')
 
     for text in KEYCAP_BASE_VS16:
         buf = hb.Buffer()
@@ -211,7 +241,7 @@ def check_emoji_sequences(face, path):
                 if g is not None:
                     vs16.add(cp)
     pres = emoji_presentation_set()
-    total, broken = 0, []
+    total, broken, bad_style = 0, [], []
     for lk in f['GSUB'].table.LookupList.Lookup:
         if lk.LookupType != 4:
             continue
@@ -233,11 +263,19 @@ def check_emoji_sequences(face, path):
                     hb.shape(font, buf, {'kern': True, 'liga': True, 'ccmp': True, 'rlig': True})
                     if len(buf.glyph_infos) != 1:
                         broken.append('+'.join(f'U+{ord(c):04X}' for c in text))
+                    else:
+                        gid = buf.glyph_infos[0].codepoint
+                        adv = buf.glyph_positions[0].x_advance
+                        if adv != 1100 or order[gid] not in colr:
+                            bad_style.append((text, order[gid], adv, order[gid] in colr))
     if broken:
         fail(f'{face}: {len(broken)}/{total} 条 emoji 连字在 RGI 形式下没有合成单字形'
              f'（例：{broken[:3]}）')
-    elif total:
-        notes.append(f'{face}: emoji 连字 {total} 条全部合成单字形')
+    if bad_style:
+        fail(f'{face}: {len(bad_style)}/{total} 条 emoji 连字不是 1100 宽的彩色字形'
+             f'（例：{bad_style[:3]}）')
+    if total and not broken and not bad_style:
+        notes.append(f'{face}: emoji 连字 {total} 条全部合成单字形且为 1100 彩色')
 
 
 def check_mark_stacking(face, path):
@@ -249,17 +287,62 @@ def check_mark_stacking(face, path):
         return
     blob = hb.Blob.from_file_path(path)
     font = hb.Font(hb.Face(blob))
-    # x 没有预组合的 acute/macron 字形，所以两个标记都会留在流里
-    buf = hb.Buffer()
-    buf.add_str('\u0078\u0301\u0304')
-    buf.guess_segment_properties()
-    hb.shape(font, buf, {'kern': True, 'liga': True, 'ccmp': True, 'rlig': True})
-    if len(buf.glyph_infos) != 3:
-        fail(f'{face}: x + U+0301 + U+0304 期望 3 个字形，实际 {len(buf.glyph_infos)}')
-        return
-    y = buf.glyph_positions[-1].y_offset
-    if y <= 0:
-        fail(f'{face}: 第二个组合符没有叠加（y_offset={y}，应为正：叠到前一个标记上方）')
+    f = TTFont(path)
+    cmap = f.getBestCmap()
+    glyf = f['glyf']
+
+    def stack_y(text, first_cp, second_cp):
+        buf = hb.Buffer()
+        buf.add_str(text)
+        buf.guess_segment_properties()
+        hb.shape(font, buf, {'kern': True, 'liga': True, 'ccmp': True, 'rlig': True})
+        if len(buf.glyph_infos) != 3:
+            fail(f'{face}: {text!r} 期望 3 个字形，实际 {len(buf.glyph_infos)}')
+            return None, None, None
+        y = buf.glyph_positions[-1].y_offset
+        g1, g2 = cmap.get(first_cp), cmap.get(second_cp)
+        if not g1 or not g2:
+            return y, None, None
+        return y, glyf[g1], glyf[g2]
+
+    # x 没有预组合的 acute/macron 字形，所以两个标记都会留在流里。
+    # 正确的 mark-to-mark 偏移 = 第一个标记的墨迹顶 - 第二个标记的墨迹底，
+    # 而不是把第二个标记整体抬高一个自身高度。
+    y, first, second = stack_y('\u0078\u0301\u0304', 0x0301, 0x0304)
+    if y is not None:
+        if y <= 0:
+            fail(f'{face}: 第二个组合符没有叠加（y_offset={y}，应为正：叠到前一个标记上方）')
+        elif first is not None and second is not None:
+            expected = first.yMax - second.yMin
+            if abs(y - expected) > 2:
+                fail(f'{face}: mark-to-mark 的 y_offset={y} 不正确，应为 '
+                     f'(第一個 yMax {first.yMax} − 第二個 yMin {second.yMin}) = {expected}：'
+                     f'第二个标记会被推得过高')
+
+    # HarfBuzz 会把 a+acute 先合成 aacute；如果预组合字母后面还有组合符，
+    # GSUB 必须先把它拆回基字母+组合符，否则第二个标记会落回基线（y_offset=0）。
+    for label, text in (('a+acute+macron', '\u0061\u0301\u0304'),
+                        ('á+macron', '\u00e1\u0304'),
+                        ('α+acute+macron', '\u03b1\u0301\u0304')):
+        y, first, second = stack_y(text, 0x0301, 0x0304)
+        if y is not None:
+            if y <= 0:
+                fail(f'{face}: {label} 没有叠加（y_offset={y}，预组合分解失效）')
+            elif first is not None and second is not None:
+                expected = first.yMax - second.yMin
+                if abs(y - expected) > 2:
+                    fail(f'{face}: {label} 的 y_offset={y} 不正确，应为 {expected}')
+
+    # below 组同理：偏移 = 第一个的 yMin - 第二个的 yMax。
+    y, first, second = stack_y('\u0078\u0327\u0328', 0x0327, 0x0328)
+    if y is not None:
+        if y >= 0:
+            fail(f'{face}: below 组合符没有向下叠加（y_offset={y}，应为负）')
+        elif first is not None and second is not None:
+            expected = first.yMin - second.yMax
+            if abs(y - expected) > 2:
+                fail(f'{face}: below mark-to-mark 的 y_offset={y} 不正确，应为 '
+                     f'{expected}（第一个 yMin {first.yMin} − 第二个 yMax {second.yMax}）')
 
 
 def gsub_outputs(gsub):
@@ -312,6 +395,22 @@ def check_face(name, pres):
     if bad:
         fail(f'{name}: 出现非等宽 advance {sorted(bad)}')
 
+    # 1b. hmtx.lsb 必须和字形的设计 xMin 一致（最多允许 base 字体自身的
+    #     26 单位光学补偿）。FreeType/HarfBuzz 会按 lsb - xMin 平移轮廓：
+    #     以前 Julia/Noto 复制过来的字形 lsb 被写成 0，∫ 左移 99 单位、
+    #     α 左移 35 单位、组合重音也整体偏到格子左边。
+    lsb_bad = []
+    for cp, g in cmap.items():
+        gl = glyf.glyphs.get(g)
+        if gl is None or getattr(gl, 'numberOfContours', 0) == 0:
+            continue
+        lsb = hmtx.metrics[g][1]
+        if abs(lsb - gl.xMin) > 32:
+            lsb_bad.append((cp, g, lsb, gl.xMin))
+    if lsb_bad:
+        fail(f'{name}: {len(lsb_bad)} 个码点的 hmtx.lsb 与字形 xMin 相差 >32：'
+             f'{[(f"U+{cp:04X}", g, lsb, xmin) for cp, g, lsb, xmin in lsb_bad[:5]]}')
+
     # 2. 不应有 locl
     if 'GSUB' in f:
         tags = [fr.FeatureTag for fr in f['GSUB'].table.FeatureList.FeatureRecord]
@@ -328,16 +427,119 @@ def check_face(name, pres):
         if n_uvs.get(sel, 0) < 200:
             fail(f'{name}: cmap format 14 的 U+{sel:04X} 变体过少（{n_uvs.get(sel, 0)}）')
 
+    # 3b. UVS 的目标字形必须真的符合呈现语义：
+    #     FE0F 指向彩色（COLR）+ 宽 1100；FE0E 指向单色 + 对应宽度。
+    #     DefaultUVS 也不能把文本默认字符留在单色却声称“emoji 呈现”。
+    colr_bases = set()
+    if 'COLR' in f:
+        colr_bases = {r.BaseGlyph for r in f['COLR'].table.BaseGlyphList.BaseGlyphPaintRecord}
+    uvs_bad = []
+    for t in f['cmap'].tables:
+        if t.format != 14:
+            continue
+        for sel, lst in getattr(t, 'uvsDict', {}).items():
+            for cp, g in lst:
+                if g is None:
+                    dg = cmap.get(cp)
+                    if dg is None:
+                        uvs_bad.append((sel, cp, 'default glyph missing'))
+                    elif sel == 0xFE0F and dg not in colr_bases and cp not in KEYCAP_BASES:
+                        uvs_bad.append((sel, cp, 'FE0F DefaultUVS 不是彩色字形'))
+                    elif sel == 0xFE0E and dg in colr_bases:
+                        uvs_bad.append((sel, cp, 'FE0E DefaultUVS 是彩色字形'))
+                    continue
+                adv = hmtx.metrics[g][0]
+                if sel == 0xFE0F:
+                    if g not in colr_bases or adv != 1100:
+                        uvs_bad.append((sel, cp, f'FE0F 目标不是 1100 彩色（adv={adv}）'))
+                else:
+                    # FE0E（文本呈现）的目标宽度：
+                    #   · 组合符 / Default_Ignorable → 0 宽
+                    #   · 文本默认字符 → 跟 cmap 里的单色字形同宽（CJK 子集 5 个是 1100）
+                    #   · Emoji_Presentation=Yes 的字符 → 文本形态 550
+                    #     （⌚ 等 EAW=W 的 emoji，VS15 后是单格文本形态）
+                    if is_combining_mark(cp) or is_Default_Ignorable(cp):
+                        exp = 0
+                    elif cp not in (pres or ()):
+                        dg = cmap.get(cp)
+                        exp = hmtx.metrics[dg][0] if dg else 550
+                    else:
+                        exp = 550
+                    if g in colr_bases or adv != exp:
+                        uvs_bad.append((sel, cp, f'FE0E 目标应为 {exp} 单色（adv={adv}）'))
+    if uvs_bad:
+        fail(f'{name}: {len(uvs_bad)} 条 UVS 的呈现/宽度不正确：'
+             f'{[(f"U+{sel:04X}", f"U+{cp:04X}", msg) for sel, cp, msg in uvs_bad[:5]]}')
+
+    # 3c. 文本默认的 emoji（Emoji=Yes, Emoji_Presentation=No）必须有 FE0F
+    #     彩色变体；键盘帽基字符按 Unicode 规则除外。斜体面曾漏掉 U+2665。
+    if pres is not None:
+        fe0f_cps = set()
+        for t in f['cmap'].tables:
+            if t.format == 14:
+                fe0f_cps.update(cp for cp, _ in t.uvsDict.get(0xFE0F, []))
+        missing_fe0f = [cp for cp in emoji_codepoint_set()
+                        if cp in cmap and cp not in pres and cp not in KEYCAP_BASES
+                        and cp not in fe0f_cps]
+        if missing_fe0f:
+            fail(f'{name}: {len(missing_fe0f)} 个文本默认 emoji 没有 FE0F 彩色变体：'
+                 f'{["U+%04X" % c for c in missing_fe0f[:8]]}')
+
+    # 3d. 文本默认 emoji 的单色字形必须真的落进自己的格子。
+    #     Noto Sans Symbols 2 是比例字体：world map 等 75 个字形原本 1000~1370
+    #     单位宽，只把 advance 改成 550 会让它们压到相邻字符上。
+    wide_emoji = []
+    if pres is not None:
+        for cp in emoji_codepoint_set():
+            if cp not in cmap or cp in pres or cp in KEYCAP_BASES:
+                continue
+            g = cmap[cp]
+            gl = glyf.glyphs.get(g)
+            if gl is None or getattr(gl, 'numberOfContours', 0) == 0:
+                continue
+            adv = hmtx.metrics[g][0]
+            if adv == 0:
+                continue
+            w = gl.xMax - gl.xMin
+            if w > adv + 20:
+                wide_emoji.append((cp, g, adv, w))
+    if wide_emoji:
+        fail(f'{name}: {len(wide_emoji)} 个文本默认 emoji 的墨迹比格子宽：'
+             f'{[(f"U+{cp:04X}", g, adv, w) for cp, g, adv, w in wide_emoji[:6]]}')
+
+    # 3e. 希腊/希腊扩展的字母必须收进 550 格。JuliaMono 的多调号大写会把
+    #     重音伸到左边（U+1F5B 墨迹 877 单位宽），不压缩就会压到相邻字母。
+    wide_greek = []
+    for a, b in ((0x0370, 0x03FF), (0x1F00, 0x1FFF)):
+        for cp in range(a, b + 1):
+            if cp not in cmap or unicodedata.category(chr(cp))[0] != 'L':
+                continue
+            g = cmap[cp]
+            gl = glyf.glyphs.get(g)
+            if gl is None or getattr(gl, 'numberOfContours', 0) == 0:
+                continue
+            adv = hmtx.metrics[g][0]
+            if adv <= 0:
+                continue
+            if gl.xMin < -2 or gl.xMax > adv + 2:
+                wide_greek.append((cp, g, adv, gl.xMin, gl.xMax))
+    if wide_greek:
+        fail(f'{name}: {len(wide_greek)} 个希腊字母墨迹超出格子：'
+             f'{[(f"U+{cp:04X}", g, adv, x0, x1) for cp, g, adv, x0, x1 in wide_greek[:6]]}')
+
     # 4. GPOS mark：mark-to-base（按 above/below 分成多个 subtable）+ mark-to-mark
     base_marks = set()
     has_mkmk = False
     if 'GPOS' in f:
         for lk in f['GPOS'].table.LookupList.Lookup:
-            if lk.LookupType == 4:
-                for st in lk.SubTable:
+            for st in lk.SubTable:
+                lt = lk.LookupType
+                if lt == 9:          # Extension：feaLib 在 subtable 很大时会包一层
+                    lt, st = st.ExtensionLookupType, st.ExtSubTable
+                if lt == 4:
                     base_marks.update(st.MarkCoverage.glyphs)
-            elif lk.LookupType == 6:
-                has_mkmk = True
+                elif lt == 6:
+                    has_mkmk = True
     n_marks = len(base_marks)
     if n_marks < 300:
         fail(f'{name}: GPOS mark 定位缺失或过少（{n_marks} 个标记）')
@@ -649,6 +851,38 @@ def check_face(name, pres):
             fail(f'{name}: sTypoAscender={o.sTypoAscender} '
                  f'< Agrave yMax={bp.bounds[3]:.0f}（macOS 可能撑大行高）')
 
+    # 13j. hhea 的 side-bearing 统计必须按最终 hmtx/glyf 重算
+    #      （lsb 修正后旧值会全部失效；GDI/旧 macOS 会用错裁切范围）
+    adv_max = 0
+    min_lsb = min_rsb = max_extent = None
+    for g in f.getGlyphOrder():
+        adv, lsb = hmtx.metrics[g]
+        adv_max = max(adv_max, adv)
+        gl = glyf.glyphs.get(g)
+        if gl is None or getattr(gl, 'numberOfContours', 0) == 0:
+            continue
+        width = gl.xMax - gl.xMin
+        rsb = adv - lsb - width
+        extent = lsb + width
+        min_lsb = lsb if min_lsb is None else min(min_lsb, lsb)
+        min_rsb = rsb if min_rsb is None else min(min_rsb, rsb)
+        max_extent = extent if max_extent is None else max(max_extent, extent)
+    hh = f['hhea']
+    expected_hhea = (adv_max, min_lsb or 0, min_rsb or 0, max_extent or 0)
+    actual_hhea = (hh.advanceWidthMax, hh.minLeftSideBearing,
+                   hh.minRightSideBearing, hh.xMaxExtent)
+    if actual_hhea != expected_hhea:
+        fail(f'{name}: hhea advance/side-bearing 统计不是按最终 hmtx 重算的：'
+             f'实际 {actual_hhea}，应为 {expected_hhea}')
+
+    # 13k. 上下标/删除线度量不能为 0（删除线厚度 0 会完全不可见）
+    if o.yStrikeoutSize <= 0:
+        fail(f'{name}: OS/2.yStrikeoutSize={o.yStrikeoutSize}，删除线会不可见')
+    if min(o.ySubscriptXSize, o.ySubscriptYSize,
+           o.ySuperscriptXSize, o.ySuperscriptYSize) <= 0:
+        fail(f'{name}: OS/2 上下标尺寸为 0（{o.ySubscriptXSize}/{o.ySubscriptYSize}/'
+             f'{o.ySuperscriptXSize}/{o.ySuperscriptYSize}）')
+
     notes.append(f'{name}: cmap={len(cmap)} width={sorted(widths)} '
                  f'UVS={ {hex(k): v for k, v in sorted(n_uvs.items())} } '
                  f'marks={n_marks} colour-default={n_colr} size={size_mb:.2f}MB')
@@ -671,19 +905,41 @@ def main():
         metrics = {k: getattr(oo, k) for k in FAMILY_METRICS}
         metrics['hhea.ascent'] = hh.ascent
         metrics['hhea.descent'] = hh.descent
+        # 上下标 / 删除线也属于 family 级样式度量，切换 face 时不能跳。
+        metrics['style'] = (oo.ySubscriptXSize, oo.ySubscriptYSize,
+                            oo.ySubscriptXOffset, oo.ySubscriptYOffset,
+                            oo.ySuperscriptXSize, oo.ySuperscriptYSize,
+                            oo.ySuperscriptXOffset, oo.ySuperscriptYOffset,
+                            oo.yStrikeoutSize, oo.yStrikeoutPosition)
         cm = set(ff.getBestCmap())
+        # UVS 的码点集合与 Default/NonDefault 状态也应四个 face 完全一致：
+        # 斜体面曾因 heart.5 改名没被找到而少了 U+2665 的 FE0F 条目。
+        uvs_sig = {}
+        for t in ff['cmap'].tables:
+            if t.format == 14:
+                for sel, lst in t.uvsDict.items():
+                    uvs_sig[sel] = tuple(sorted((cp, g is not None) for cp, g in lst))
         if ref is None:
-            ref = (face, metrics, cm)
+            ref = (face, metrics, cm, uvs_sig)
         else:
-            rface, rmetrics, rcm = ref
+            rface, rmetrics, rcm, ruvs = ref
             if metrics != rmetrics:
                 diff = {k: (rmetrics[k], metrics[k]) for k in rmetrics if rmetrics[k] != metrics[k]}
-                fail(f'family 纵向指标不一致（{rface} vs {face}）：{diff}')
+                fail(f'family 纵向/样式指标不一致（{rface} vs {face}）：{diff}')
             if cm != rcm:
                 a = ['U+%04X' % c for c in sorted(rcm - cm)[:4]]
                 b = ['U+%04X' % c for c in sorted(cm - rcm)[:4]]
                 fail(f'family 码点覆盖不一致（{rface} vs {face}）：'
                      f'仅 {rface} 有 {a}；仅 {face} 有 {b}')
+            if uvs_sig != ruvs:
+                for sel in sorted(set(ruvs) | set(uvs_sig)):
+                    ra = set(ruvs.get(sel, ()))
+                    rb = set(uvs_sig.get(sel, ()))
+                    if ra != rb:
+                        miss = ['U+%04X' % cp for cp, _ in sorted(ra - rb)[:4]]
+                        extra = ['U+%04X' % cp for cp, _ in sorted(rb - ra)[:4]]
+                        fail(f'family UVS 不一致（U+{sel:04X}，{rface} vs {face}）：'
+                             f'仅 {rface} 有 {miss}；仅 {face} 有 {extra}')
 
     # 15. OTS：浏览器按同一套检查决定要不要加载字体
     ots = _ots_runner()

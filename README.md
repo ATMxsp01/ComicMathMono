@@ -35,7 +35,7 @@ Faces: **Regular, Bold, Italic, Bold Italic** (in [`dist/`](dist/)).
 - **Emoji presentation follows Unicode**: text-default characters (© ® ▪ ☀ ❤ …) carry a
   monochrome outline and switch to colour with VS16; colour-default ones (⌚ ⏰ ⏩ …) carry the
   colour glyph and switch to monochrome with VS15. A real cmap format-14 UVS table is generated
-  (229 variants each way; 228 in the italic faces). Keycap base characters (`0-9` `#` `*`) are
+  (229 FE0E / 1448 FE0F entries in **all four** faces). Keycap base characters (`0-9` `#` `*`) are
   deliberately **DefaultUVS** so the `ccmp` keycap ligature still matches — `1️⃣` (with VS16)
   collapses to a single glyph — see [`docs/merge-renaming.md`](docs/merge-renaming.md) §3.2.
 - A GPOS `mark` lookup is generated for all 400 combining marks. They come from JuliaMono
@@ -44,9 +44,11 @@ Faces: **Regular, Bold, Italic, Bold Italic** (in [`dist/`](dist/)).
   pushed them into the right half of the cell (measured: +182 too far right).
 - **Metadata is normalised across the four faces**: one version (`1.0`, identical in
   `head.fontRevision`, name ID5 and ID3), one set of vertical metrics — `typo` 1030/−248
-  (line height 1278) drives line spacing and always clears the tallest glyph (`Agrave` reaches
-  988, 1026 in the slanted faces), while `usWinAscent/Descent` 1317/1029 cover every glyph so
-  nothing is clipped on Windows, selected via `fsSelection` bit 7 (USE_TYPO_METRICS); plus
+  (line height 1278) drives line spacing; `Agrave` reaches 989 (1026 in slanted faces), and the
+  tallest Latin glyph is `hcircumflex` at 1167 (box drawing/emoji reach 1317 in the slanted
+  faces), so tall glyphs can overflow the line box by design. `usWinAscent/Descent` 1317/1029
+  cover every glyph so nothing is clipped on Windows, selected via `fsSelection` bit 7
+  (USE_TYPO_METRICS); plus
   `post.isFixedPitch = 1`,
   `xAvgCharWidth = 550`, `fsType = 0`, and underline metrics. Combining
   marks *and* `Default_Ignorable` characters (ZWJ, tag characters, …) are zero-width, and
@@ -66,7 +68,7 @@ Faces: **Regular, Bold, Italic, Bold Italic** (in [`dist/`](dist/)).
   `gftools fix-nonhinting` adds to unhinted fonts; no `gasp` table is used.
 - Glyphs are **reordered by advance** at the end of the build so that the commonest advance
   (1100 — the emoji block) forms the tail of the glyph order. `hmtx` can then trim everything
-  after the first 21 321 entries, which saves ~85 KB per face (four faces: ~330 KB) — without it
+  after the first 21 317 entries, which saves ~85 KB per face (four faces: ~330 KB) — without it
   the zero-width ZWJ/tag glyphs sit inside the emoji tail and every one of the ~64 k glyphs
   needs its own explicit entry.
 
@@ -98,7 +100,7 @@ see `build.py::add_coptic_capitals()`.
 | Braille | 100% |
 | Nerd Font icons (incl. plane-15 Material Design Icons) | 100% |
 | Colour emoji (Noto COLRv1) | 100% of source — in **all four** faces |
-| Emoji presentation (VS15 / VS16) | implemented — 229 real UVS variants each way (228 in italics) |
+| Emoji presentation (VS15 / VS16) | implemented — 229 FE0E / 1448 FE0F entries in all four faces |
 | Hebrew / Arabic | partial (JuliaMono's coverage) |
 | CJK | **not included** (by design) |
 
@@ -212,10 +214,23 @@ does not match a fresh build.
   we deliberately do not carry JuliaMono's `init`/`medi`/`fina` GSUB, so no letter joining;
   proper Arabic shaping needs a dedicated font.
 - **Hebrew** is covered, including niqqud (vowel points).
+- **Two/three-em dashes** (`U+2E3A`/`U+2E3B`) keep their source ink width (1067/1600) but a
+  550-unit advance, so they deliberately overhang the cell; a monospace grid cannot represent
+  multi-cell dashes without breaking alignment.
+- **Line box overflow**: typo metrics are 1030/−248; `hcircumflex` reaches 1167 and some
+  descenders reach −567, so these glyphs can spill into adjacent lines. `usWin` 1317/1029
+  prevents clipping on Windows, but the typographic line box does not clear every glyph.
 - **No kerning**, and no layout features beyond `ccmp` + `mark`.
 - **Marks stack**: GPOS mark-to-base *and* mark-to-mark are generated. Marks are split into
-  above/below classes, and a second mark is placed on the ink top (or bottom) of the first one
-  (anchor heights are quantised to 20 units, ~58 classes for 379 marks).
+  above/below classes, and a second mark is placed on the ink top (or bottom) of the first one.
+  Mark-to-mark uses **per-glyph** anchors (`y_offset = yMax(first) − yMin(second)`), so stacked
+  marks sit directly on each other rather than being pushed a full glyph height too high.
+- **Precomposed + extra mark**: HarfBuzz normally composes `a + acute` to `aacute`; a contextual
+  `ccmp` rule decomposes it back to `a + acute` **only when another combining mark follows**, so
+  the second mark can use mark-to-mark instead of falling back to the baseline.
+- **Greek polytonic letters** are horizontally fitted into the 550 cell (30-unit side bearings):
+  JuliaMono's multi-accent capitals reach 877 units wide (U+1F5B), which would otherwise
+  collide with neighbouring letters.
 - **Colour emoji need COLRv1** support in the renderer (kitty, Chromium, Firefox 116+, …).
   Emoji are present in all four faces, so bold/italic prose does not fall back to a
   different emoji font either. ZWJ sequences work in both spellings — with and without
@@ -230,9 +245,10 @@ does not match a fresh build.
 shaping of the emoji/VS16/keycap sequences, coverage vs. sources, vertical metrics, `hmtx`,
 `STAT`, `prep`, case pairs, unreachable glyphs, …).
 
-`fontbakery check-universal dist/*.ttf` currently reports **0 FAIL**. The 8 remaining WARN classes
+`fontbakery check-universal dist/*.ttf` currently reports **0 FAIL**. The 9 remaining WARN classes
 (contour counts of the comic outlines, zero-length segments, `post` format 3 vs 2, `xAvgCharWidth`
-for a monospaced font, double-width emoji, file size, partial CJK punctuation, decomposed carons)
+for a monospaced font, double-width emoji, file size, partial CJK punctuation, decomposed carons,
+`bad-numberOfHMetrics`; 48 warnings in total)
 are deliberate trade-offs — each one is explained, with measurements, in
 [`docs/fontbakery-warnings.md`](docs/fontbakery-warnings.md).
 
@@ -261,7 +277,7 @@ are deliberate trade-offs — each one is explained, with measurements, in
   完整来龙去脉见 [`docs/locl-issue.md`](docs/locl-issue.md)。
 - emoji 的**默认呈现**按 Unicode 规则实现：文本默认的符号（© ® ▪ ☀ ❤…）给**单色轮廓**（VS16 切彩色），
   彩色默认的（⌚ ⏰ ⏩…）给**彩色字形**（VS15 切单色），并写入真正的 cmap format 14 变体表
-  （229 条，斜体面 228 条）。键盘帽基字符（`0-9` `#` `*`）是例外，故意写成 **DefaultUVS**，
+  （四个 face 各 229 条 FE0E / 1448 条 FE0F）。键盘帽基字符（`0-9` `#` `*`）是例外，故意写成 **DefaultUVS**，
   这样 `ccmp` 键盘帽连字才匹配得上——带 VS16 的 `1️⃣` 也能合成单字形，见
   [`docs/emoji-presentation.md`](docs/emoji-presentation.md) 与
   [`docs/merge-renaming.md`](docs/merge-renaming.md) §3.2。
@@ -289,7 +305,7 @@ are deliberate trade-offs — each one is explained, with measurements, in
   （`PUSHW 511 / SCANCTRL / PUSHB 4 / SCANTYPE`），避免小字号下 1 像素的细线整段消失。
   这正是 `gftools fix-nonhinting` 给未 hinting 字体补的内容；没有使用 `gasp` 表。
 - 构建收尾会**按 advance 重排字形**，把最常见的 advance（1100，即 emoji 段）排到字序尾部；
-  这样 `hmtx` 只需前 21 321 条显式记录，每 face 省约 85 KB（四 face 共约 330 KB）。不重排的话
+  这样 `hmtx` 只需前 21 317 条显式记录，每 face 省约 85 KB（四 face 共约 330 KB）。不重排的话
   0 宽的 ZWJ/Tag 字形会插在 emoji 尾部里面，6.3 万个字形全都要写显式记录。
 
 ### 覆盖范围
@@ -318,7 +334,7 @@ cap height(668)、在格子里居中、advance 仍为 550 —— 见 `build.py::
 | 盲文 | 100% |
 | Nerd Font 图标（含平面 15 Material Design Icons） | 100% |
 | 彩色 emoji（Noto COLRv1） | 源字体的 100%，**四个字重都有** |
-| emoji 默认呈现与 VS15/VS16 | 已实现（各 229 条真 UVS） |
+| emoji 默认呈现与 VS15/VS16 | 已实现（四个 face 各 229 FE0E / 1448 FE0F） |
 | 希伯来 / 阿拉伯 | 部分（JuliaMono 覆盖多少就多少） |
 | CJK | **不含**（有意为之） |
 
@@ -425,9 +441,19 @@ byte-identical 的字体，CI 也会在「提交的 dist/ 和重新构建的结�
 - **阿拉伯文**只覆盖 JuliaMono 有的部分，且**只有孤立形态**（没有并入 JuliaMono 的
   `init`/`medi`/`fina`，因此不做字母连写）；正确的阿拉伯文排版需要专用字体。
 - **希伯来文**已覆盖，含元音点（niqqud）。
+- **两倍/三倍长破折号**（`U+2E3A`/`U+2E3B`）保留源字形的墨迹宽度（1067/1600），
+  但 advance 仍是 550，因此会故意伸出格子；等宽网格无法在不破坏对齐的前提下表示多格破折号。
+- **行框溢出**：typo 指标为 1030/−248，而 `hcircumflex` 到 1167、部分下伸部到 −567，
+  这些字形可能侵入相邻行；`usWin` 1317/1029 保证 Windows 不裁切，但排版行框并不包住所有字形。
 - **没有 kerning**，排版特性只有 `ccmp` 与 `mark`。
 - **组合符可以叠加**：GPOS 同时生成了 mark-to-base 与 mark-to-mark。标记按 above/below 分类，
-  第二个标记会落在前一个标记的墨迹顶（或底）上（锚点高度按 20 单位量化，379 个标记压成 ~58 档）。
+  第二个标记会落在前一个标记的墨迹顶（或底）上；mark-to-mark 使用**逐字形**锚点
+  （`y_offset = yMax(第一个) − yMin(第二个)`），不会把第二个标记整体抬高一个自身高度。
+- **预组合字母 + 额外标记**：HarfBuzz 会先把 `a + acute` 合成 `aacute`；GSUB 里加了一条
+  contextual `ccmp` 规则，**只有后面还跟着组合符时**才拆回 `a + acute`，让第二个标记走
+  mark-to-mark，而不是落回基线。
+- **希腊多调号字母**会水平收进 550 格并留 30 单位侧边距：JuliaMono 的多重音大写
+  （如 U+1F5B）墨迹宽达 877 单位，不收会压到相邻字母上。
 - **彩色 emoji 需要渲染器支持 COLRv1**（kitty、Chromium、Firefox 116+ 等）。ZWJ 序列**带不带
   VS16 都能合成**（肤色、键盘帽、国旗、Tag 旗帜同理；GSUB 里 2,564 条连字全部实测）。
 - 源字体是快照（见 `sources/README.md`）；更新的 Nerd Font / Noto 版本会带来新字形。
@@ -437,9 +463,9 @@ byte-identical 的字体，CI 也会在「提交的 dist/ 和重新构建的结�
 日常回归靠 `python3 tools/verify.py`（OTS 消毒、HarfBuzz 对 emoji/VS16/键盘帽序列的 shaping、
 与源字体的覆盖比对、纵向指标、`hmtx`、`STAT`、`prep`、大小写配对、不可达字形……）。
 
-`fontbakery check-universal dist/*.ttf` 目前 **0 FAIL**；剩下的 8 类 WARN（comic 轮廓数、
+`fontbakery check-universal dist/*.ttf` 目前 **0 FAIL**；剩下的 9 类 WARN（comic 轮廓数、
 零长线段、`post` format 3、等宽字体的 `xAvgCharWidth`、双宽 emoji、文件体积、CJK 标点、
-分解式 caron）都是有意取舍，逐条的理由与实测数字见
+分解式 caron、`bad-numberOfHMetrics`，共 48 条）都是有意取舍，逐条的理由与实测数字见
 [`docs/fontbakery-warnings.md`](docs/fontbakery-warnings.md)。
 
 ### 许可证

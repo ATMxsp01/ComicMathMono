@@ -47,6 +47,10 @@ Unicode 给每个 emoji 字符定义了**默认呈现**（`Emoji_Presentation`�
 
 - 对每个"Noto 有、且默认是文本呈现"的码点，依次从
   **JuliaMono → Noto Sans Symbols 2** 拷一份单色轮廓进来；
+- **Noto Sans Symbols 2 是比例符号字体**：world map 等 75 个字形原本按
+  1000~1370 单位宽设计，只改 advance 会让墨迹横跨 2~2.5 格并压到相邻字符上。
+  `build.py::normalize_symbol_font()` 会把超过 550 的轮廓水平压缩、重新居中，
+  使文本呈现形态真正落进单格；加 VS16 仍走 Noto 的 1100 彩色字形。
 - 两者都没有的**直接丢弃** ——
   与其留一个"看不见"的字符，不如让系统回退字体去兜底。
 
@@ -78,7 +82,8 @@ Noto 源字体的 cmap format 14 里 **371 条全是 DefaultUVS**（值为 `None
 (cp, U+FE0E) -> 单色字形    # 强制文本呈现
 ```
 
-各 **229 条**（Regular/Bold；Italic/BoldItalic 为 228 条）。
+NonDefault 各 **217 条**；FE0E 总计 **229 条**（含 12 条 DefaultUVS），FE0F 总计 **1,448 条**
+（含 1,231 条 DefaultUVS），四个 face 完全一致。
 
 **例外：键盘帽基字符**（`0-9` `#` `*`，共 12 个）仍然写成 **DefaultUVS**。
 原因见 [`merge-renaming.md`](merge-renaming.md) §3.2：它们的 VS16 一旦指向彩色数字
@@ -101,7 +106,7 @@ Noto 源字体的 cmap format 14 里 **371 条全是 DefaultUVS**（值为 `None
 默认彩色的 emoji（cmap 已经指向 COLR 基字形）也要登记 `(cp, U+FE0F) -> None`（DefaultUVS）。
 它们都是合法的 `emoji + FE0F` 写法，不登记的话 FE0F 会作为"不可见字形"残留 ——
 实测 `🏴 + FE0F + ZWJ + ☠ + FE0F` 会散成 2 个字形。目前 DefaultUVS 共 **1,231** 条
-（键盘帽 12 + 默认彩色 1,219），NonDefault VS16 229 条。
+（键盘帽 12 + 默认彩色 1,219），NonDefault VS16 217 条。
 
 ### 3.6 ZWJ 连字必须同时接受彩色字形
 
@@ -153,7 +158,7 @@ Noto 源字体的 cmap format 14 里 **371 条全是 DefaultUVS**（值为 `None
 - 依赖系统装有 emoji 字体。
 
 现在四个 face 都跑同一套 emoji 合并，`tools/verify.py` 会断言每个 face 里
-**1228 个「默认彩色」码点全部指向彩色字形**。代价是体积（每面约 8.2 MB）。
+**1228 个「默认彩色」码点全部指向彩色字形**。代价是体积（每面约 8.3–8.4 MB）。
 
 ## 4d. 5 个「CJK 类 emoji」：从 Noto Sans CJK 抠一个 4 KB 子集
 

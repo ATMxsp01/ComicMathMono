@@ -7,7 +7,7 @@
 > （可复现构建 + CI 防漂移 + CJK 子集转 TrueType）、文档与许可订正、P2 的 A2（hmtx 尾部压缩，
 > 每 face ~85 KB）、A1 的决策（保持四 face 都带 emoji）、C2（STAT 表）、C3（smart dropout）
 > C4（Coptic 大写合成）、C5（WARN 定调）与 C6（name 表补齐）。fontbakery `check-universal`
-> 目前 **FAIL 0 / WARN 32**。
+> 目前 **FAIL 0 / WARN 48（9 类 × 4 face）**。
 > 详见 git 历史与 README。
 
 状态：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 完成 · `[-]` 明确不做（保留说明） ·
@@ -28,7 +28,7 @@
 
 - [x] **A2 · hmtx 尾部压缩（已完成）** —— 每 face 省 **~84.6 KB**（四 face 共 **~330 KB**）。
   - 做法：构建收尾按 advance 重排字形，把最常见的 advance（1100，emoji 段）排到字序尾部
-    （`build.py::compact_hmtx()`），`hhea.numberOfHMetrics` 63 591 → **21 321**，hmtx 254 KB → 170 KB。
+    （`build.py::compact_hmtx()`），`hhea.numberOfHMetrics` 63 591 → **21 317**，hmtx 254 KB → 170 KB。
   - 关键：重排必须在 **GPOS 之前**（`finalize_widths_and_order()` → `add_mark_feature()`），
     因为 GPOS 的 `Coverage` 与 `MarkArray`/`BaseArray` 是按 GID 对齐的平行数组，而 feaLib 的
     `buildCoverage` 按当前 GID 排序。GSUB（Merger 产物）不受影响：其 Coverage 在 preWrite 时
@@ -57,12 +57,18 @@
 - [x] **D1 · mark-to-mark（已完成）** —— `add_mark_feature()` 现在同时生成 mark-to-base 与
   mark-to-mark：
   - 标记按自身墨迹分成 **above / below** 两类，第二个同类标记落在前一个的墨迹顶（或底）上；
-  - 高度量化到 20 单位（379 个标记 → above 43 档 + below 15 档），GPOS 只涨 ~1.6 KB（正体）；
+  - **逐字形**锚点：`y_offset = yMax(first) − yMin(second)`（below 为 `yMin(first) − yMax(second)`），
+    不再是“第二个标记锚点=0”的量化写法（那会把 macron 推到 y≈1325）；
   - **关键坑**：`mark` 特性原来只注册在 `DFLT` 下，实测希伯来文（hebr）会**退回 HarfBuzz 的
     启发式定位**（偏移全是猜的，`shin+qamats` 得到 (158,-17)）。显式注册
     `latn/grek/cyrl/hebr/arab/armn/geor` 后才走我们的锚点（`y=-40` 正确叠加）。
-  - 实测：`x + U+0301 + U+0304` → macron `y_offset=740`；`ש + dagesh + qamats` 两个标记不重叠。
-  - `verify.py` 加了断言（GPOS 必须有 LookupType 6 + 叠加实测 y_offset>0）。
+  - 实测：`x + U+0301 + U+0304` → macron `y_offset=155`（macron 墨迹 741–814，正好贴在 acute 的 740 上）；
+    `x + U+0301 + U+0304 + U+0303` 依次叠到 932。
+  - **预组合陷阱**：HarfBuzz 会先把 `a + U+0301` 合成 `aacute`，第二个标记就看不到
+    「第一个标记」。`decompose_precomposed_for_stacking()` 加了一条 contextual `ccmp`：
+    预组合字母**后面还有组合符**时拆回基字母 + 组合符；`á + U+0304` 的 macron 也从 0 修到 155。
+  - `verify.py` 断言：GPOS 必须有 LookupType 6；above/below 的 y_offset 必须等于两端墨迹差（±2）；
+    `a/á/α + U+0301 + U+0304` 都必须叠到正确高度。
 
 - [L] **D2 · Arabic 连写形态（低优先级 · 暂缓）**
   目前只有**孤立形态**（未并入 JuliaMono 的 `init`/`medi`/`fina` GSUB）。要做需要把 Julia 的
@@ -114,7 +120,7 @@
   - 代价 +212~236 B/face；`verify.py` 加了两条断言（大小写配对齐全；合成大写的 advance/墨迹
     不越界），并用反例验证过。
 
-- [x] **C5 · WARN 逐条定调（已完成）** —— 40 条 / 10 类，修掉 2 类，其余 8 类文档化。
+- [x] **C5 · WARN 逐条定调（已完成）** —— C5 当时 40 条 / 10 类，修掉 2 类；后续审计/工具版本更新后当前基线为 **48 条 / 9 个 code**（见文首），其余全部文档化。
   - 修：`typoascender_exceeds_Agrave` → `ASCENT/DESCENT` 928/−350 → **1030/−248**（行高 1278
     不变；斜体 Agrave 因倾斜 bbox 到 1026，所以必须按最坏值取）。verify 13i 断言。
   - 修：`unreachable_glyphs` → `drop_unreachable_glyphs()` 按
@@ -126,7 +132,7 @@
     的墨迹面积，放弃）、`post_table_version`（转 fmt2 要 +730 KB/face）、`xavgcharwidth`、
     `monospace`（bad-numberOfHMetrics + mono-outliers）、`file_size`、`cjk_not_enough_glyphs`、
     `alt_caron`（已目视确认）。
-  - 结果：**FAIL 0，WARN 32（8 类 × 4 face）**。选择写文档而不是加 `.fontbakeryrc` 真豁免 ——
+  - 结果：**FAIL 0，WARN 48（9 类 × 4 face）**。选择写文档而不是加 `.fontbakeryrc` 真豁免 ——
     避免以后这些检查的回归被一起遮住。
 
 - [x] **C6 · name 表补齐（已完成）** —— 新增 ID 8/9（`ATMxsp01`）、10（简介）、11/12（两个
@@ -160,6 +166,7 @@
 
 ## 参考
 
-- `tools/verify.py` —— 15 组已固化的回归断言（含 OTS、emoji 序列 shaping、四 face 一致性、name 表）。
+- `tools/verify.py` —— 20+ 组已固化的回归断言（含 OTS、emoji 序列 shaping、lsb/mark 定位、
+  四 face 一致性、name 表）。
 - `.github/workflows/build.yml` —— 构建 → 回归校验 → 「dist/ 与源码一致（可复现构建）」。
 - `docs/` —— 每个踩过的坑对应一份说明。
