@@ -10,7 +10,8 @@
 > 目前 **FAIL 0 / WARN 32**。
 > 详见 git 历史与 README。
 
-状态：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 完成 · `[-]` 明确不做（保留说明）
+状态：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 完成 · `[-]` 明确不做（保留说明） ·
+`[L]` 低优先级 / 暂缓（短时间内不做）
 
 ---
 
@@ -21,6 +22,9 @@
   如果以后想瘦身，可选方向：只 Regular/Bold 带 emoji（省 ~8.8 MB，但斜体 emoji 要系统兜底、粗体丢
   VS 切换）；或另出「无 emoji」变体。每 face emoji 相关约 **4.4 MB**（glyf 3.39 MB + COLR 1.07 MB
   + CPAL 25 KB），约占 53%。
+  - **`--no-emoji` 变体：暂缓**（2026-10 决定）。如果以后要做，会和「把 Nerd Font 图标拆成
+    单独变体」一起做 —— 单独切 emoji 而不切 Nerd Font，收益只有一半，却要维护两套产物；
+    两件事一起做才有一次性的"瘦身"价值（可降到 ~1 MB + 图标子集）。
 
 - [x] **A2 · hmtx 尾部压缩（已完成）** —— 每 face 省 **~84.6 KB**（四 face 共 **~330 KB**）。
   - 做法：构建收尾按 advance 重排字形，把最常见的 advance（1100，emoji 段）排到字序尾部
@@ -60,13 +64,15 @@
   - 实测：`x + U+0301 + U+0304` → macron `y_offset=740`；`ש + dagesh + qamats` 两个标记不重叠。
   - `verify.py` 加了断言（GPOS 必须有 LookupType 6 + 叠加实测 y_offset>0）。
 
-- [ ] **D2 · Arabic 连写形态**
+- [L] **D2 · Arabic 连写形态（低优先级 · 暂缓）**
   目前只有**孤立形态**（未并入 JuliaMono 的 `init`/`medi`/`fina` GSUB）。要做需要把 Julia 的
   排版规则并入（含字形重命名 + 规则重映射），或换一个覆盖更好的源字体。
 
-- [ ] **D3 · 轮廓去重**
+- [L] **D3 · 轮廓去重（低优先级 · 实测收益太小）**
   用 `fontTools.ttLib.removeOverlaps` 清理 overlapping path segments（个别光栅器会有伪影）。
-  会改动轮廓、增加体积，需要重跑全套验证（OTS + shaping + 视觉抽查）。
+  2026-10 实测：只有 **558 组 / 1 671 个字形**有重复轮廓，全并了也只省 **84 KB**（还要把
+  cmap/GSUB/COLR/ClipList 的引用一起重映射）→ 不做；相关 WARN 已在
+  `docs/fontbakery-warnings.md` 里说明。
 
 ---
 
@@ -90,7 +96,7 @@
     反而关掉抗锯齿）。
   - `verify.py` 已加断言（缺 `prep` 或字节不对都会失败），并用反例验证过。
 
-- [ ] **H1 · 真 hinting（可选，独立排期）**
+- [L] **H1 · 真 hinting（低优先级 · 暂缓）**
   当前字体完全没有指令（无 `cvt`/`fpgm`，0 个字形带指令）。若要小字号更锐利，可对**非 emoji**
   字形跑 `ttfautohint`：
   - 42 000 个 COLR 图层字形没有意义（矢量绘制，不走字形 hinting）；

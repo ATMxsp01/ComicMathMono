@@ -138,6 +138,31 @@ mkdir -p ~/.local/share/fonts/ComicMathMono
 cp dist/ComicMathMono-*.ttf ~/.local/share/fonts/ComicMathMono/
 ```
 
+Verify (four faces, and the version you actually installed):
+
+```bash
+fc-list | grep -i ComicMathMono          # expect 4 lines: Regular / Bold / Italic / Bold Italic
+python3 -c "from fontTools.ttLib import TTFont; \
+  print(TTFont('$HOME/.local/share/fonts/ComicMathMono/ComicMathMono-Regular.ttf')['name'].getDebugName(5))"
+# -> Version 1.0
+```
+
+Uninstall:
+
+```bash
+rm -rf ~/.local/share/fonts/ComicMathMono
+```
+
+System-wide (needs root; still no `fc-cache`):
+
+```bash
+sudo install -d /usr/share/fonts/ComicMathMono
+sudo install -m644 dist/ComicMathMono-*.ttf /usr/share/fonts/ComicMathMono/
+```
+
+After installing, **restart** running terminals / IDEs / browsers — they read the font files at
+startup, so already-open windows keep using the old file.
+
 kitty example (`~/.config/kitty/kitty.conf`):
 
 ```conf
@@ -331,6 +356,31 @@ cap height(668)、在格子里居中、advance 仍为 550 —— 见 `build.py::
 mkdir -p ~/.local/share/fonts/ComicMathMono
 cp dist/ComicMathMono-*.ttf ~/.local/share/fonts/ComicMathMono/
 ```
+
+验证（应有 4 个 face，并确认装进去的是哪个版本）：
+
+```bash
+fc-list | grep -i ComicMathMono          # 期望 4 行：Regular / Bold / Italic / Bold Italic
+python3 -c "from fontTools.ttLib import TTFont; \
+  print(TTFont('$HOME/.local/share/fonts/ComicMathMono/ComicMathMono-Regular.ttf')['name'].getDebugName(5))"
+# -> Version 1.0
+```
+
+卸载：
+
+```bash
+rm -rf ~/.local/share/fonts/ComicMathMono
+```
+
+装到系统级（需要 root，同样不要 `fc-cache`）：
+
+```bash
+sudo install -d /usr/share/fonts/ComicMathMono
+sudo install -m644 dist/ComicMathMono-*.ttf /usr/share/fonts/ComicMathMono/
+```
+
+装完后**重启**正在运行的终端 / IDE / 浏览器 —— 它们在启动时就把字体文件读进内存了，
+已开的窗口会继续用旧文件。
 
 kitty 配置示例（`~/.config/kitty/kitty.conf`）：
 
