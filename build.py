@@ -478,13 +478,18 @@ def normalize_symbol_font(font):
     return font
 
 
-def fit_glyphs_in_cells(font, ranges):
-    """把指定区间的**字母**字形收进自己的 advance 格子。
+def fit_glyphs_in_cells(font, ranges=None, categories=None, margin=25):
+    """把指定字形收进自己的 advance 格子，避免终端按 cell 裁切。
 
-    JuliaMono 的希腊多调号大写（如 U+1F5B）在 2000upem/1200 格中靠左伸出的
-    重音设计，缩放到 550 格后墨迹仍有 877 单位宽，直接排会压到相邻字母上。
-    这里只对 ranges 内的 Letter 类别、非零 advance 字形做水平压缩/居中：
-    宽度超过 advance 时按比例压缩，最后把墨迹 bbox 居中到格内。
+    典型来源：
+      · JuliaMono 的希腊多调号大写（U+1F5B 墨迹 877 单位宽）；
+      · SeriousShanns 的斜体：C/E/I/X 的墨迹跨到 -47..613，kitty 会把
+        超出 cell 的部分直接裁掉（官方 FAQ 明确要求等宽字体所有 face 都必须
+        落在同一固定宽度内）。
+
+    ``ranges=None`` 表示不限制码点；``categories=None`` 表示不限制 Unicode
+    大类。宽度超过 ``advance - 2*margin`` 时水平压缩，最后把墨迹 bbox 居中
+    到格内，并留出左右 margin。
     """
     from fontTools.ttLib.tables._g_l_y_f import GlyphCoordinates
     glyf = font['glyf']
@@ -493,11 +498,13 @@ def fit_glyphs_in_cells(font, ranges):
     seen = set()
     fitted = 0
     for cp, g in cmap.items():
-        if g in seen or not any(a <= cp <= b for a, b in ranges):
+        if g in seen:
             continue
-        if unicodedata.category(chr(cp))[0] != 'L':
+        if ranges is not None and not any(a <= cp <= b for a, b in ranges):
             continue
-        gl = glyf.glyphs.get(g)
+        if categories is not None and unicodedata.category(chr(cp)) not in categories:
+            continue
+        gl = glyf[g]
         if gl is None or getattr(gl, 'numberOfContours', 0) == 0 or not hasattr(gl, 'coordinates'):
             continue
         adv, _ = hmtx.metrics[g]
@@ -508,13 +515,12 @@ def fit_glyphs_in_cells(font, ranges):
             continue
         xmin, xmax = min(xs), max(xs)
         w = xmax - xmin
-        if w <= adv and xmin >= -2 and xmax <= adv + 2:
+        # 留出侧边距：即使 bbox 收进 0..550，贴着格子边也会让相邻字形
+        # 的重音/斜体笔画在渲染时相碰；kitty 也按 cell 边界裁切。
+        max_w = max(1, adv - 2 * margin)
+        if w <= max_w and xmin >= margin - 2 and xmax <= adv - margin + 2:
             seen.add(g)
             continue
-        # 留 30 单位侧边距：即使 bbox 收进 0..550，贴着格子边也会让
-        # 下一个字母的左侧重音与前一个字母的右缘相碰。
-        margin = 30
-        max_w = max(1, adv - 2 * margin)
         s = min(1.0, max_w / w) if w > max_w else 1.0
         cx = (xmin + xmax) / 2.0
         gl.coordinates = GlyphCoordinates(
@@ -524,6 +530,18 @@ def fit_glyphs_in_cells(font, ranges):
         seen.add(g)
         fitted += 1
     return fitted
+
+
+def fit_terminal_text(font, style):
+    """让终端文本字形落在 cell 内；斜体额外处理数字、标点和数学符号。"""
+    letters = ('Lu', 'Ll', 'Lt', 'Lm', 'Lo')
+    n = fit_glyphs_in_cells(font, categories=letters, margin=25)
+    if style in ('Italic', 'Bold Italic'):
+        italic_text = ('Nd', 'Nl', 'No', 'Pc', 'Pe', 'Pf', 'Pi', 'Po', 'Ps',
+                       'Sc', 'Sk', 'Sm')
+        n += fit_glyphs_in_cells(font, categories=italic_text, margin=25)
+    return n
+
 
 
 def drop_cmap_entry(font, cp):
@@ -1714,10 +1732,6 @@ def build_face(style, base_key, julia_key, emoji, overwrite):
             filled = copy_julia_into(base, ref, [], gap, False, suffix='.comic')
             print(f'  覆盖率对齐：从 Comic 补入 {filled} 个 PUA 图标')
 
-    n_fit = fit_glyphs_in_cells(base, [(0x0370, 0x03FF), (0x1F00, 0x1FFF)])
-    if n_fit:
-        print(f'  希腊多调号：{n_fit} 个字母收进 {CELL} 格（原墨迹越界）')
-
     z = zero_width_marks(base)
     print(f'  Julia 层拷入 {n} 个码点（其中组合标记 0 宽化 {z} 个）')
 
@@ -1748,6 +1762,10 @@ def build_face(style, base_key, julia_key, emoji, overwrite):
     n_coptic = add_coptic_capitals(font)
     if n_coptic:
         print(f'  Coptic 大写：从对应小写合成 {n_coptic} 个（缩放到 cap，advance {CELL}）')
+
+    n_fit = fit_terminal_text(font, style)
+    if n_fit:
+        print(f'  cell 收格：{n_fit} 个字形（字母/斜体文本 原墨迹越界）')
 
     # 先删控制码映射：可达性判断要基于**最终**的 cmap（否则 CR 这类字形会被算成可达）
     n_ctl = drop_control_cmap(font)

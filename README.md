@@ -228,9 +228,11 @@ does not match a fresh build.
 - **Precomposed + extra mark**: HarfBuzz normally composes `a + acute` to `aacute`; a contextual
   `ccmp` rule decomposes it back to `a + acute` **only when another combining mark follows**, so
   the second mark can use mark-to-mark instead of falling back to the baseline.
-- **Greek polytonic letters** are horizontally fitted into the 550 cell (30-unit side bearings):
-  JuliaMono's multi-accent capitals reach 877 units wide (U+1F5B), which would otherwise
-  collide with neighbouring letters.
+- **Terminal cell fitting**: every letter glyph in all four faces is fitted inside the 550-unit
+  cell with 25-unit side bearings; Italic/BoldItalic additionally fit digits, punctuation,
+  currency and math symbols. This includes Greek polytonic capitals (JuliaMono's U+1F5B is 877 units wide).
+  SeriousShanns' italic overhangs by up to ~70 units (`C/E/I`, `d`, `/`, `%`), and kitty clips
+  out-of-cell ink by design — so italic letters are intentionally a little narrower than upstream.
 - **Colour emoji need COLRv1** support in the renderer (kitty, Chromium, Firefox 116+, …).
   Emoji are present in all four faces, so bold/italic prose does not fall back to a
   different emoji font either. ZWJ sequences work in both spellings — with and without
@@ -452,8 +454,10 @@ byte-identical 的字体，CI 也会在「提交的 dist/ 和重新构建的结�
 - **预组合字母 + 额外标记**：HarfBuzz 会先把 `a + acute` 合成 `aacute`；GSUB 里加了一条
   contextual `ccmp` 规则，**只有后面还跟着组合符时**才拆回 `a + acute`，让第二个标记走
   mark-to-mark，而不是落回基线。
-- **希腊多调号字母**会水平收进 550 格并留 30 单位侧边距：JuliaMono 的多重音大写
-  （如 U+1F5B）墨迹宽达 877 单位，不收会压到相邻字母上。
+- **终端 cell 收格**：四个 face 的所有字母都收进 550 单格并留 25 单位侧边距；
+  斜体/粗斜体还会收数字、标点、货币与数学符号。希腊多调号大写也在内
+  （JuliaMono 的 U+1F5B 墨迹宽达 877 单位）。SeriousShanns 斜体最多越界约 70 单位
+  （`C/E/I`、`d`、`/`、`%`），而 kitty 会按 cell 边界裁切 —— 所以斜体字母会比上游略窄。
 - **彩色 emoji 需要渲染器支持 COLRv1**（kitty、Chromium、Firefox 116+ 等）。ZWJ 序列**带不带
   VS16 都能合成**（肤色、键盘帽、国旗、Tag 旗帜同理；GSUB 里 2,564 条连字全部实测）。
 - 源字体是快照（见 `sources/README.md`）；更新的 Nerd Font / Noto 版本会带来新字形。

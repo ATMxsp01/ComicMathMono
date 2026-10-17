@@ -401,7 +401,7 @@ def check_face(name, pres):
     #     α 左移 35 单位、组合重音也整体偏到格子左边。
     lsb_bad = []
     for cp, g in cmap.items():
-        gl = glyf.glyphs.get(g)
+        gl = glyf[g]
         if gl is None or getattr(gl, 'numberOfContours', 0) == 0:
             continue
         lsb = hmtx.metrics[g][1]
@@ -494,7 +494,7 @@ def check_face(name, pres):
             if cp not in cmap or cp in pres or cp in KEYCAP_BASES:
                 continue
             g = cmap[cp]
-            gl = glyf.glyphs.get(g)
+            gl = glyf[g]
             if gl is None or getattr(gl, 'numberOfContours', 0) == 0:
                 continue
             adv = hmtx.metrics[g][0]
@@ -507,25 +507,29 @@ def check_face(name, pres):
         fail(f'{name}: {len(wide_emoji)} 个文本默认 emoji 的墨迹比格子宽：'
              f'{[(f"U+{cp:04X}", g, adv, w) for cp, g, adv, w in wide_emoji[:6]]}')
 
-    # 3e. 希腊/希腊扩展的字母必须收进 550 格。JuliaMono 的多调号大写会把
-    #     重音伸到左边（U+1F5B 墨迹 877 单位宽），不压缩就会压到相邻字母。
-    wide_greek = []
-    for a, b in ((0x0370, 0x03FF), (0x1F00, 0x1FFF)):
-        for cp in range(a, b + 1):
-            if cp not in cmap or unicodedata.category(chr(cp))[0] != 'L':
-                continue
-            g = cmap[cp]
-            gl = glyf.glyphs.get(g)
-            if gl is None or getattr(gl, 'numberOfContours', 0) == 0:
-                continue
-            adv = hmtx.metrics[g][0]
-            if adv <= 0:
-                continue
-            if gl.xMin < -2 or gl.xMax > adv + 2:
-                wide_greek.append((cp, g, adv, gl.xMin, gl.xMax))
-    if wide_greek:
-        fail(f'{name}: {len(wide_greek)} 个希腊字母墨迹超出格子：'
-             f'{[(f"U+{cp:04X}", g, adv, x0, x1) for cp, g, adv, x0, x1 in wide_greek[:6]]}')
+    # 3e. 所有 Letter 字形都必须落在自己的 cell 内；否则 kitty 会按 cell
+    #     裁切（官方 FAQ：等宽字体的 bold/italic face 不能比 normal face 宽）。
+    #     斜体面额外检查 Basic Latin / Latin-1 的数字和标点。
+    overhang = []
+    for cp, g in cmap.items():
+        cat = unicodedata.category(chr(cp))
+        is_letter = cat[0] == 'L'
+        italic_text_cats = {'Nd', 'Nl', 'No', 'Pc', 'Pe', 'Pf', 'Pi', 'Po',
+                            'Ps', 'Sc', 'Sk', 'Sm'}
+        is_italic_text = name in ('Italic', 'BoldItalic') and cat in italic_text_cats
+        if not (is_letter or is_italic_text):
+            continue
+        gl = glyf[g]
+        if gl is None or getattr(gl, 'numberOfContours', 0) == 0:
+            continue
+        adv = hmtx.metrics[g][0]
+        if adv <= 0:
+            continue
+        if gl.xMin < 20 or gl.xMax > adv - 20:
+            overhang.append((cp, g, adv, gl.xMin, gl.xMax))
+    if overhang:
+        fail(f'{name}: {len(overhang)} 个字形墨迹超出格子（kitty 会裁切）：'
+             f'{[(f"U+{cp:04X}", g, adv, x0, x1) for cp, g, adv, x0, x1 in overhang[:8]]}')
 
     # 4. GPOS mark：mark-to-base（按 above/below 分成多个 subtable）+ mark-to-mark
     base_marks = set()
@@ -554,7 +558,7 @@ def check_face(name, pres):
     # U+2800 是「盲文空白」，字形本身就是空的
     EXPECTED_BLANK = {0x2800}
     for cp, g in cmap.items():
-        gl = glyf.glyphs.get(g)
+        gl = glyf[g]
         if gl is None or getattr(gl, 'numberOfContours', -1) != 0:
             continue
         if cp in EXPECTED_BLANK:
@@ -858,7 +862,7 @@ def check_face(name, pres):
     for g in f.getGlyphOrder():
         adv, lsb = hmtx.metrics[g]
         adv_max = max(adv_max, adv)
-        gl = glyf.glyphs.get(g)
+        gl = glyf[g]
         if gl is None or getattr(gl, 'numberOfContours', 0) == 0:
             continue
         width = gl.xMax - gl.xMin
