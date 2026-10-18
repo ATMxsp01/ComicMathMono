@@ -1,22 +1,30 @@
 # fontbakery `check-universal` 的已知 WARN 与豁免理由
 
-本文档记录 `fontbakery check-universal` 在本项目四个 face 上**仍然会报、但我们有意不修**的
+本文档记录 `fontbakery check-universal` 在本项目四个主 face 上**仍然会报、但我们有意不修**的
 检查项，以及为什么。目标：让后来的人一眼看出"这是已知的取舍"，而不是漏修。
 
-复现：
+复现主字体（四个 face）：
 
 ```bash
 pip install -r requirements.txt
-fontbakery check-universal --skip-network dist/*.ttf
+fontbakery check-universal --skip-network \
+  dist/ComicMathMono-Regular.ttf dist/ComicMathMono-Bold.ttf \
+  dist/ComicMathMono-Italic.ttf dist/ComicMathMono-BoldItalic.ttf
+```
+
+CJK 伴生字体单独看（它有意只含 CJK，见 §3）：
+
+```bash
+fontbakery check-universal --skip-network dist/ComicMathMono-CJK-*.ttf
 ```
 
 ## 当前基线
 
-| 项目 | 结果 |
-|---|---|
-| FAIL | **0** |
-| WARN | 48（9 个检查 code × 4 face；本文 §2 按 8 个小节归类，其中 2.5 含 2 个 code） |
-| PASS | 见运行输出 |
+| 项目 | 主字体四 face | CJK 伴生字体两 face |
+|---|---|---|
+| FAIL | **0** | 4（2 个 code × 2 face，见 §3） |
+| WARN | 48（9 个检查 code × 4 face；§2 按 8 个小节归类，其中 2.5 含 2 个 code） | 8（4 个 code × 2 face，见 §3） |
+| PASS | 见运行输出 | 见运行输出 |
 
 C5 之前是 40 条（10 类）。已修掉的两类见 §1、§2。
 
@@ -169,7 +177,71 @@ emoji 把平均值拉高）。
 
 ---
 
-## 3. 与本文件相关的不变量
+## 3. CJK 伴生字体（`dist/ComicMathMono-CJK-*.ttf`）
+
+CJK 伴生字体有意只含 **CJK W/F** 码点，不烤进主字体；它的 FAIL/WARN 与主字体分开看。
+运行：
+
+```bash
+fontbakery check-universal --skip-network dist/ComicMathMono-CJK-*.ttf
+```
+
+当前结果：**FAIL 4（2 个 code × 2 face）**、**WARN 8（4 个 code × 2 face）**。
+
+### 3.1 `file_size`（`massive-font`）— FAIL，有意保留
+
+- **报什么**：Regular 14.3 MB、Bold 12.0 MB。
+- **为什么不修**：URO 20,992 / 17,629 个字形，CJK 字体不可能压到 Google Fonts 的
+  体积阈值；要压只能砍 URO，违背“常用中文全覆盖”的目标。
+- 这是本项目的本地终端伴生字体，不是 Google Fonts 提交物。
+
+### 3.2 `whitespace_glyphs` — FAIL，有意保留
+
+- **报什么**：缺 `U+0020`、`U+00A0`。
+- **为什么不修**：伴生字体**只含 CJK W/F**，空格由主字体 `ComicMathMono` 提供（550 宽）。
+  如果在这里补空格：
+  - 用 1100 宽 → 空格变成两格，破坏浏览器/编辑器的单格空格；
+  - 用 550 宽 → 字体不再是全部 1100 宽，`post.isFixedPitch` 与 `hhea.advanceWidthMax`
+    的等宽契约被打破。
+- 主字体在链里永远排在前面，空格不会落到这里；这是有意的职责分离。
+
+### 3.3 `opentype/post_table_version` — WARN，有意保留
+
+- 与主字体相同：用 `post` format 3（无字形名）省体积；CJK 字体 23k 个字形名会多出
+  数百 KB，对终端没有收益。
+
+### 3.4 `opentype/monospace` / `bad-numberOfHMetrics` — WARN，有意保留
+
+- **报什么**：`numberOfHMetrics = 1`，规范建议 3。
+- **事实**：伴生字体所有 glyph advance 都是 1100，fontTools 在 `hmtx.compile()` 里会
+  自动把全等宽字体压到 1 个 longHorMetric（[fontTools #3014]）；我们显式设 3 也会被压回 1。
+- 这是 fontTools 的已知行为，不影响等宽；同理，`hhea.advanceWidthMax` / `xAvgCharWidth`
+  仍是 1100。
+
+[fontTools #3014]: https://github.com/fonttools/fonttools/issues/3014
+
+### 3.5 `cjk_chws_feature` — WARN，有意保留
+
+- **报什么**：没有 `chws` / `vchw`。
+- **为什么不修**：这是终端横排字体，不做竖排标点压缩；加了也没有排版引擎会用。
+
+### 3.6 `overlapping_path_segments` — WARN，有意保留
+
+- **报什么**：部分 Yozai 手写轮廓有重叠/零长段。
+- **为什么不修**：和主字体 §2.2 的理由相同——清理会改变手写字形墨迹，风险大于收益。
+
+### 3.7 已修掉的项目（防止回退）
+
+| 检查 | 修法 |
+|---|---|
+| `mandatory_glyphs` / `notdef-is-blank` | Bold 空 `.notdef` 补一个空心方框 |
+| `no_mac_entries` | 删除所有 platformID=1 的 name 记录 |
+| `smart_dropout` | 加 7 字节 `prep`：`PUSHW 511 / SCANCTRL / PUSHB 4 / SCANTYPE` |
+| `fsSelection` | Regular `0xC0`、Bold `0xA0`；OS/2 version 4 |
+
+---
+
+## 4. 与本文件相关的不变量
 
 | 不变量 | 由谁保证 |
 |---|---|
@@ -179,3 +251,5 @@ emoji 把平均值拉高）。
 | 四 face 纵向指标与覆盖一致 | `verify.py` 家族级检查 |
 | 构建可复现 | `.github/workflows/build.yml` 的 dist/ diff 检查 |
 | name 表 ID 齐全（8/9/10/11/12/19/21/22）、URL 为 https、WWS 与 typographic 一致、ID7 为空 | `verify.py` 13b |
+| CJK 伴生字体只含 W/F、无 ASCII、全部 1100、8105/GB2312 全满 | `tools/verify_cjk.py` |
+| CJK 构建可复现 | `make_cjk_companion.py` 的 `PYTHONHASHSEED=0` + CI dist/ diff |

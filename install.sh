@@ -20,7 +20,7 @@ mkdir -p "$DEST"
 shopt -s nullglob
 files=("$ROOT"/dist/ComicMathMono-*.ttf)
 if [ ${#files[@]} -eq 0 ]; then
-    echo "dist/ 里没有字体，请先跑：python3 build.py" >&2
+    echo "dist/ 里没有字体，请先跑：python3 build.py；CJK 伴生字体再加 python3 tools/make_cjk_companion.py" >&2
     exit 1
 fi
 

@@ -9,20 +9,26 @@ all normalized to one clean 1000‑upem grid.
 
 ## English
 
-ComicMathMono is a merged monospace font assembled from three open-source families:
+ComicMathMono is a merged monospace font assembled from three open-source layers,
+plus a separate CJK companion:
 
 | Layer | Source | License |
 |---|---|---|
 | Latin · box drawing · Nerd Font icons | ComicShannsMono & SeriousShanns Nerd Fonts | MIT |
 | Greek · math · arrows · technical · braille | JuliaMono | OFL-1.1 |
 | Color emoji | Noto Color Emoji (COLRv1) | OFL-1.1 |
+| CJK companion (`ComicMathMono CJK`, separate font) | Yozai + Noto Sans CJK SC gap subset | OFL-1.1 |
 
-Faces: **Regular, Bold, Italic, Bold Italic** (in [`dist/`](dist/)).
+Faces: **Regular, Bold, Italic, Bold Italic**, plus the CJK companion
+**ComicMathMono CJK Regular / Bold** (in [`dist/`](dist/)).
 
 ### Design
 
 - **1000 upem**, single cell = **550**; emoji = **1100** (exactly two cells); combining marks = **0**.
-- CJK is intentionally **not** baked in — leave it to the terminal's fontconfig fallback chain.
+- The main font has **no CJK**. A separate CJK companion, `ComicMathMono CJK`, is built from
+  Yozai and contains **only CJK W/F codepoints**; every glyph is **1100** wide, so a Chinese
+  glyph occupies exactly 2 cells. It is not baked into the main font — the terminal fontconfig
+  chain decides when to use it. See [`docs/cjk.md`](docs/cjk.md).
 - Emoji are merged with `fontTools`' `Merger`. The bogus `locl` feature that `Merger` synthesizes
   for duplicate codepoints is removed, so digits/symbols are not swapped out in Latin runs.
   The whole story is in [`docs/locl-issue.md`](docs/locl-issue.md).
@@ -102,30 +108,38 @@ see `build.py::add_coptic_capitals()`.
 | Colour emoji (Noto COLRv1) | 100% of source — in **all four** faces |
 | Emoji presentation (VS15 / VS16) | implemented — 229 FE0E / 1448 FE0F entries in all four faces |
 | Hebrew / Arabic | partial (JuliaMono's coverage) |
-| CJK | **not included** (by design) |
+| CJK | main font: **not included**; companion `ComicMathMono CJK`: URO **20,992 / 20,992**, 通用规范汉字表 **8,105 / 8,105**, GB2312 hanzi **6,763 / 6,763**; ExtA/ExtB via Jigmo |
 
 ### Recommended fontconfig fallback chain
 
 Because ComicMathMono absorbs both upstream monospace families, the `monospace` chain only
-needs to keep what genuinely lies outside this font (CJK) plus an emoji safety net:
+needs to keep what genuinely lies outside the main font (CJK):
 
 ```xml
 <match target="pattern">
     <test qual="any" name="family"><string>monospace</string></test>
     <edit name="family" mode="prepend" binding="strong">
         <string>ComicMathMono</string>       <!-- 1. main font (emoji in all four weights) -->
-        <string>Noto Color Emoji</string>    <!-- 2. safety net (the 21 codepoints left out are PUA/unassigned) -->
-        <string>Sarasa Mono SC</string>      <!-- 3. CJK, monospaced -->
-        <string>Jigmo</string>               <!-- 4. rare ideographs URO/ExtA   -->
-        <string>Jigmo2</string>              <!-- 5. rare ideographs ExtB~F/I  -->
-        <string>Jigmo3</string>              <!-- 6. rare ideographs ExtG/H/J  -->
+        <string>ComicMathMono CJK</string>   <!-- 2. CJK companion (Yozai-derived, 1100) -->
+        <string>Jigmo</string>               <!-- 3. rare ideographs URO/ExtA   -->
+        <string>Jigmo2</string>              <!-- 4. rare ideographs ExtB~F/I  -->
+        <string>Jigmo3</string>              <!-- 5. rare ideographs ExtG/H/J  -->
     </edit>
 </match>
 ```
 
-This replaces a chain that had to carry `ComicShannsMono Nerd Font Mono` and
-`JuliaMono Nerd Font Mono` — both are provably redundant now (measured coverage gap: **0**
-codepoints for each).
+`Noto Color Emoji` is **not needed in the `monospace` chain**: ComicMathMono's color
+layer comes from Noto COLRv1 **2.057** (Unicode 18), newer than the system Noto
+**2.051**. Compared with the system Noto, ComicMathMono lacks only `U+0000`/`U+000D`
+and 21 Noto-internal PUA codepoints (`U+FE4E5–FE4EE`, `U+FE82C`, `U+FE82E–FE837`);
+all real emoji, including ZWJ / keycap / flag sequences, are present (HarfBuzz shapes
+them to a single glyph). The **global append** rule still keeps `Noto Color Emoji`
+for sans-serif/serif contexts where ComicMathMono is not in the chain.
+
+This replaces a chain that had to carry `ComicShannsMono Nerd Font Mono`,
+`JuliaMono Nerd Font Mono`, and `Sarasa Mono SC` — the first two are provably redundant
+(measured coverage gap: **0** codepoints), and Sarasa is replaced by the CJK companion.
+The companion has **Regular / Bold only**; CJK under Italic/BoldItalic stays upright.
 
 ### Install
 
@@ -140,10 +154,12 @@ mkdir -p ~/.local/share/fonts/ComicMathMono
 cp dist/ComicMathMono-*.ttf ~/.local/share/fonts/ComicMathMono/
 ```
 
-Verify (four faces, and the version you actually installed):
+Verify (four main faces + the CJK companion, and the version you actually installed):
 
 ```bash
-fc-list | grep -i ComicMathMono          # expect 4 lines: Regular / Bold / Italic / Bold Italic
+fc-list | grep -i ComicMathMono
+# expect 6 lines: Regular / Bold / Italic / Bold Italic + CJK Regular / CJK Bold
+fc-match 'ComicMathMono CJK'
 python3 -c "from fontTools.ttLib import TTFont; \
   print(TTFont('$HOME/.local/share/fonts/ComicMathMono/ComicMathMono-Regular.ttf')['name'].getDebugName(5))"
 # -> Version 1.0
@@ -186,30 +202,38 @@ font_family ComicMathMono
 
 ```bash
 pip install -r requirements.txt
-python3 build.py        # writes into dist/
+python3 build.py                     # main four faces -> dist/
+python3 tools/make_cjk_companion.py  # ComicMathMono CJK Regular/Bold -> dist/
 ```
 
 Source fonts live in [`sources/`](sources/) — see [`sources/README.md`](sources/README.md) for
 provenance and how to (re)download them.
 
-Run `python3 tools/verify.py` afterwards to check the invariants learned from the bugs
-documented in [`docs/`](docs/) — including an OTS sanitizer pass (browsers reject fonts that
-fail it), a raw `glyf` reserved-flag check, and a HarfBuzz check that emoji sequences
-(keycap / flag / ZWJ) still ligate into a single glyph
+Run `python3 tools/verify.py` and `python3 tools/verify_cjk.py` afterwards to check the
+invariants learned from the bugs documented in [`docs/`](docs/) — including an OTS sanitizer
+pass (browsers reject fonts that fail it), a raw `glyf` reserved-flag check, and a HarfBuzz
+check that emoji sequences (keycap / flag / ZWJ) still ligate into a single glyph
 (see the CI workflow in [`.github/workflows/build.yml`](.github/workflows/build.yml)).
+The CJK verifier additionally asserts: only W/F codepoints, no ASCII, every advance = 1100,
+URO 20,992/20,992, 通用规范汉字表 8,105/8,105, GB2312 hanzi 6,763/6,763, JIS X 0208 kana/kanji 6,647/6,647, and all 27 gaps present.
 
-The build is **reproducible**: `build.py` re-execs itself with `PYTHONHASHSEED=0` (fontTools'
-OT-table layout depends on Python's string hash randomisation, so without it every build produced
-a different `GPOS`) and pins `head.created/modified` to `SOURCE_DATE_EPOCH` (default 2000-01-01).
-Building twice therefore yields byte-identical fonts, and CI fails if the committed `dist/`
-does not match a fresh build.
+The build is **reproducible**: `build.py` and `tools/make_cjk_companion.py` re-exec with
+`PYTHONHASHSEED=0` (fontTools' OT-table layout depends on Python's string hash randomisation)
+and pin `head.created/modified` to `SOURCE_DATE_EPOCH` (default 2000-01-01). Building twice
+therefore yields byte-identical fonts, and CI fails if the committed `dist/` does not match a
+fresh build.
 
 ### Known limitations
 
-- **No CJK.** CJK ideographs and CJK punctuation are out of scope by design — the only
-  script-like leftovers are 5 CJK-adjacent emoji, which *are* included via a tiny 4 KB
-  glyph subset extracted from Noto Sans CJK (see [`docs/emoji-presentation.md`](docs/emoji-presentation.md)).
-  21 further codepoints are intentionally absent (Noto-internal PUA / unassigned — nothing types them).
+- **The main font has no CJK.** CJK ideographs and CJK punctuation live in the separate
+  `ComicMathMono CJK` companion (Regular/Bold). The main font only carries 5 CJK-adjacent
+  emoji via a tiny 4 KB subset from Noto Sans CJK (see
+  [`docs/emoji-presentation.md`](docs/emoji-presentation.md)).
+- **The CJK companion is CJK-only.** It contains no ASCII/Latin/punctuation; spaces come from
+  the main font. ExtA/ExtB–J, Hangul, and compatibility ideographs fall back to Jigmo.
+  The Bold face covers all 8,105 standard characters and GB2312; the 3,363 URO chars outside
+  8,105 fall back to the Regular (Medium) face or Jigmo. Italic CJK stays upright.
+  23 further codepoints are intentionally absent (2 control codes + 21 Noto-internal PUA — nothing types them).
 - **Arabic** is covered only as far as JuliaMono covers it, and only in its **isolated** forms —
   we deliberately do not carry JuliaMono's `init`/`medi`/`fina` GSUB, so no letter joining;
   proper Arabic shaping needs a dedicated font.
@@ -273,11 +297,15 @@ are deliberate trade-offs — each one is explained, with measurements, in
 「JuliaMono 的希腊/数学/箭头/技术/盲文层」和「Noto COLRv1 彩色 emoji」融合进同一套
 1000 upem 网格，单格固定 550 单位、emoji 1100（正好两格），在终端里对齐行为可预测。
 
-包含 **Regular / Bold / Italic / Bold Italic** 四个 face，构建产物在 [`dist/`](dist/)。
+包含 **Regular / Bold / Italic / Bold Italic** 四个主 face，以及 CJK 伴生字体
+**ComicMathMono CJK Regular / Bold**；构建产物在 [`dist/`](dist/)。
 
 ### 设计要点
 
-- **1000 upem，单格 550**；emoji **1100**（两格）；组合标记 **0 宽**。CJK **不烤进字体**，交给终端 fontconfig 回退链。
+- **1000 upem，单格 550**；emoji **1100**（两格）；组合标记 **0 宽**。
+- **主字体不含 CJK**。CJK 由单独的伴生字体 `ComicMathMono CJK` 承担：它由 Yozai 派生，
+  **只含 CJK W/F 码点**，所有字形 advance **1100**，正好占两格；不烤进主字体，
+  由终端 fontconfig 链决定何时使用。详见 [`docs/cjk.md`](docs/cjk.md)。
 - emoji 用 `fontTools` 的 `Merger` 合并；合并器会自动合成一条 `locl`，我们把它删掉了，
   否则它在拉丁文片段里会把 ASCII 数字/空格换成 Noto 的空/宽字形（表现为「数字消失」）。
   完整来龙去脉见 [`docs/locl-issue.md`](docs/locl-issue.md)。
@@ -342,7 +370,7 @@ cap height(668)、在格子里居中、advance 仍为 550 —— 见 `build.py::
 | 彩色 emoji（Noto COLRv1） | 源字体的 100%，**四个字重都有** |
 | emoji 默认呈现与 VS15/VS16 | 已实现（四个 face 各 229 FE0E / 1448 FE0F） |
 | 希伯来 / 阿拉伯 | 部分（JuliaMono 覆盖多少就多少） |
-| CJK | **不含**（有意为之） |
+| CJK | 主字体**不含**；伴生字体 `ComicMathMono CJK`：URO **20,992 / 20,992**、通用规范汉字表 **8,105 / 8,105**、GB2312 汉字 **6,763 / 6,763**；ExtA/ExtB 交给 Jigmo |
 
 ### 推荐的 fontconfig fallback 链
 
@@ -354,17 +382,25 @@ cap height(668)、在格子里居中、advance 仍为 550 —— 见 `build.py::
     <test qual="any" name="family"><string>monospace</string></test>
     <edit name="family" mode="prepend" binding="strong">
         <string>ComicMathMono</string>       <!-- 1. 主字体（四个字重都带 emoji） -->
-        <string>Noto Color Emoji</string>    <!-- 2. 安全网（未收录的 21 个都是私用区/未分配码点） -->
-        <string>Sarasa Mono SC</string>      <!-- 3. 等宽中文 -->
-        <string>Jigmo</string>               <!-- 4. 生僻字 URO/ExtA  -->
-        <string>Jigmo2</string>              <!-- 5. 生僻字 ExtB~F/I -->
-        <string>Jigmo3</string>              <!-- 6. 生僻字 ExtG/H/J  -->
+        <string>ComicMathMono CJK</string>   <!-- 2. CJK 伴生字体（Yozai 衍生，1100） -->
+        <string>Jigmo</string>               <!-- 3. 生僻字 URO/ExtA  -->
+        <string>Jigmo2</string>              <!-- 4. 生僻字 ExtB~F/I -->
+        <string>Jigmo3</string>              <!-- 5. 生僻字 ExtG/H/J  -->
     </edit>
 </match>
 ```
 
-原来的链里还要写 `ComicShannsMono Nerd Font Mono` 和 `JuliaMono Nerd Font Mono` ——
-现在两者都是**可证明冗余**的（实测覆盖缺口各为 **0** 个码点）。
+`monospace` 链里**不再需要 Noto Color Emoji**：ComicMathMono 的彩色 emoji 来自
+Noto COLRv1 **2.057**（Unicode 18），比系统 Noto **2.051** 更新。和系统 Noto 相比，
+CMM 只缺 `U+0000`/`U+000D` 和 21 个 Noto 内部 PUA（`U+FE4E5–FE4EE`、`U+FE82C`、
+`U+FE82E–FE837`）；所有真正可键入的 emoji 和 ZWJ / 键盘帽 / 旗帜序列都有
+（HarfBuzz 实测都合成单字形）。全局 append 规则仍保留 `Noto Color Emoji`，
+供 sans-serif/serif 等不在 CMM 链里的场景使用。
+
+原来的链里还要写 `ComicShannsMono Nerd Font Mono`、`JuliaMono Nerd Font Mono` 和
+`Sarasa Mono SC` —— 前两者是**可证明冗余**的（实测覆盖缺口各为 **0** 个码点），
+Sarasa 则由 CJK 伴生字体替代。伴生字体只有 **Regular / Bold**；CJK 在 Italic/BoldItalic
+下保持直立。
 
 ### 安装
 
@@ -379,10 +415,12 @@ mkdir -p ~/.local/share/fonts/ComicMathMono
 cp dist/ComicMathMono-*.ttf ~/.local/share/fonts/ComicMathMono/
 ```
 
-验证（应有 4 个 face，并确认装进去的是哪个版本）：
+验证（应有 4 个主 face + 2 个 CJK face，并确认装进去的是哪个版本）：
 
 ```bash
-fc-list | grep -i ComicMathMono          # 期望 4 行：Regular / Bold / Italic / Bold Italic
+fc-list | grep -i ComicMathMono
+# 期望 6 行：Regular / Bold / Italic / Bold Italic + CJK Regular / CJK Bold
+fc-match 'ComicMathMono CJK'
 python3 -c "from fontTools.ttLib import TTFont; \
   print(TTFont('$HOME/.local/share/fonts/ComicMathMono/ComicMathMono-Regular.ttf')['name'].getDebugName(5))"
 # -> Version 1.0
@@ -424,8 +462,10 @@ font_family ComicMathMono
 
 ```bash
 pip install -r requirements.txt
-python3 build.py        # 产物写入 dist/
-python3 tools/verify.py # 回归校验
+python3 build.py                     # 主字体四个 face -> dist/
+python3 tools/make_cjk_companion.py  # ComicMathMono CJK Regular/Bold -> dist/
+python3 tools/verify.py              # 主字体回归校验
+python3 tools/verify_cjk.py          # CJK 伴生字体校验
 ```
 
 源字体在 [`sources/`](sources/)，来源与重新下载方式见 [`sources/README.md`](sources/README.md)。
@@ -433,17 +473,24 @@ python3 tools/verify.py # 回归校验
 还会跑 OTS（浏览器就是用同一套检查决定收不收字体）、检查 glyf 简单字形的 flag 保留位，
 并用 HarfBuzz 实测 emoji 序列（键盘帽/旗帜/ZWJ）是否仍合成成单个字形；
 CI 见 [`.github/workflows/build.yml`](.github/workflows/build.yml)。
+`tools/verify_cjk.py` 另外断言：只含 W/F 码点、无 ASCII、所有 advance=1100、
+URO 20,992/20,992、通用规范汉字表 8,105/8,105、GB2312 汉字 6,763/6,763、JIS X 0208 假名/汉字 6,647/6,647、27 个缺口全有。
 
-构建是**可复现**的：`build.py` 会带 `PYTHONHASHSEED=0` 自重启（fontTools 排布 OT 表时受
-Python 字符串哈希随机化影响，不固定的话每次构建出来的 `GPOS` 都不一样），并把
-`head.created/modified` 固定为 `SOURCE_DATE_EPOCH`（默认 2000-01-01）。因此连跑两次得到
-byte-identical 的字体，CI 也会在「提交的 dist/ 和重新构建的结果不一致」时直接失败。
+构建是**可复现**的：`build.py` 和 `tools/make_cjk_companion.py` 都会带
+`PYTHONHASHSEED=0` 自重启（fontTools 排布 OT 表时受 Python 字符串哈希随机化影响，
+不固定的话每次构建出来的 `GPOS` 都不一样），并把 `head.created/modified` 固定为
+`SOURCE_DATE_EPOCH`（默认 2000-01-01）。因此连跑两次得到 byte-identical 的字体，
+CI 也会在「提交的 dist/ 和重新构建的结果不一致」时直接失败。
 
 ### 已知限制
 
-- **不含 CJK**。汉字与中文标点按设计排除在外。唯一相关的 5 个 CJK 类 emoji **已收录** ——
-  做法是从 Noto Sans CJK 里抠出一个 4 KB 的 5 字形子集，见 [`docs/emoji-presentation.md`](docs/emoji-presentation.md)。
-  另有 21 个码点故意不收（Noto 内部私用区/未分配码点，正常打字永远不会用到）。
+- **主字体不含 CJK**。汉字与中文标点由单独的 `ComicMathMono CJK` 伴生字体承担
+  （Regular/Bold）。主字体只收录 5 个 CJK 类 emoji，做法是从 Noto Sans CJK 里抠出一个
+  4 KB 的 5 字形子集，见 [`docs/emoji-presentation.md`](docs/emoji-presentation.md)。
+  另有 23 个码点故意不收（2 个控制码 + 21 个 Noto 内部私用区码点，正常打字永远不会用到）。
+- **CJK 伴生字体只含 CJK W/F**：没有 ASCII/拉丁/标点，空格由主字体提供；
+  ExtA/ExtB–J、谚文、兼容表意交给 Jigmo。Bold 覆盖 8,105 个规范字和 GB2312，
+  8,105 之外的 3,363 个 URO 字回退到 Regular（Medium）或 Jigmo；斜体 CJK 保持直立。
 - **阿拉伯文**只覆盖 JuliaMono 有的部分，且**只有孤立形态**（没有并入 JuliaMono 的
   `init`/`medi`/`fina`，因此不做字母连写）；正确的阿拉伯文排版需要专用字体。
 - **希伯来文**已覆盖，含元音点（niqqud）。
